@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_session_factory
 from app.core.exceptions import ConflictProblem, ValidationProblem
 from app.core.password_policy import denial_reason
-from app.core.security import hash_password
+from app.core.security import hash_password_async
 from app.models.audit import AdminAuditEvent
 from app.models.enums import UserRole
 from app.models.user import User, set_roles
@@ -94,7 +94,7 @@ async def create_admin(
     user = User(
         email=normalised,
         full_name=full_name,
-        password_hash=hash_password(password),
+        password_hash=await hash_password_async(password),
     )
     db.add(user)
     await db.flush()

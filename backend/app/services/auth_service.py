@@ -35,12 +35,12 @@ from app.core.exceptions import (
 from app.core.password_policy import denial_reason
 from app.core.security import (
     TokenPair,
-    burn_password_verification,
+    burn_password_verification_async,
     create_token_pair,
     hash_opaque_token,
-    hash_password,
+    hash_password_async,
     password_needs_rehash,
-    verify_password,
+    verify_password_async,
 )
 from app.models.course_unit import Subject, University
 from app.models.enums import UserRole
@@ -268,7 +268,7 @@ async def register(db: AsyncSession, request: RegisterRequest) -> AuthResponse:
         )
 
     email = normalise_email(request.email)
-    password_hash = hash_password(request.password)
+    password_hash = await hash_password_async(request.password)
 
     if await load_user_by_email(db, email) is not None:
         raise ConflictProblem("An account already exists for that email address.")
@@ -316,10 +316,10 @@ async def authenticate(db: AsyncSession, request: LoginRequest) -> AuthResponse:
     """
     user = await load_user_by_email(db, request.email)
     if user is None:
-        burn_password_verification()
+        await burn_password_verification_async()
         raise _credentials_rejected()
 
-    if not verify_password(request.password, user.password_hash):
+    if not await verify_password_async(request.password, user.password_hash):
         raise _credentials_rejected()
 
     if not user.is_active:
@@ -339,7 +339,7 @@ async def authenticate(db: AsyncSession, request: LoginRequest) -> AuthResponse:
         # stored hash is safe. It is how a raised Argon2 cost reaches existing
         # accounts without a migration: each account is upgraded the next time
         # its owner signs in.
-        user.password_hash = hash_password(request.password)
+        user.password_hash = await hash_password_async(request.password)
 
     response = await _issue_tokens(db, user)
     await db.commit()

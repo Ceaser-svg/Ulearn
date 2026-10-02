@@ -6,6 +6,7 @@ the Argon2 hasher or the JWT library directly, so either algorithm can change
 without touching a service.
 """
 
+import asyncio
 import contextlib
 import hashlib
 import hmac
@@ -212,6 +213,10 @@ def password_needs_rehash(stored: str) -> bool:
     The service calls this after a successful verification and rewrites the row,
     which is how a raised floor reaches accounts gradually instead of all at
     once.
+
+    Deliberately *not* wrapped in `to_thread`: it only parses the parameters out
+    of the PHC string and compares numbers, so there is no Argon2 work to move
+    off the loop.
     """
     if stored.startswith(_PBKDF2_PREFIX):
         return True
@@ -222,6 +227,51 @@ def password_needs_rehash(stored: str) -> bool:
         # "needs rehash" is the safe answer, because the rehash only happens
         # after a *successful* verification, which this hash cannot pass.
         return True
+
+
+# ---------------------------------------------------------------------------
+# Awaitable forms of the three functions above that do Argon2 work.
+#
+# Everything below is synchronous and stays that way. Argon2 is a blocking,
+# memory-hard function and the correct answer to "how do I stop it blocking" is
+# not to make it async -- it is to not run it on the thread whose job is to
+# serve everyone else.
+#
+# Hashing sign-up or signing in cost ~50ms of CPU and 19 MiB of resident memory
+# per call. On the event loop that is not 50ms for the one person signing in; it
+# is 50ms during which *every* concurrent request in the process is not being
+# served, including the requests that are not signing in. A handful of people
+# signing in at once is the entire API stalling, and it looks in the metrics like
+# general slowness rather than like the cause.
+#
+# `asyncio.to_thread` is the right size of tool here, and the GIL is not a
+# problem: `argon2-cffi` computes in Rust and releases the GIL for the duration
+# of the hash, so these threads genuinely run in parallel.
+#
+# The one thing `to_thread` does *not* do is bound how many run at once, and 19
+# MiB each means unbounded concurrency is an out-of-memory kill. The rate
+# limiter in `app.core.rate_limit` is what caps it.
+# ---------------------------------------------------------------------------
+
+
+async def hash_password_async(password: str) -> str:
+    """[hash_password] without holding the event loop for the duration."""
+    return await asyncio.to_thread(hash_password, password)
+
+
+async def verify_password_async(password: str, stored: str) -> bool:
+    """[verify_password] without holding the event loop for the duration."""
+    return await asyncio.to_thread(verify_password, password, stored)
+
+
+async def burn_password_verification_async() -> None:
+    """[burn_password_verification] without holding the event loop.
+
+    On the sign-in path this is the branch that runs when *no* account matched
+    the address, so it was the one blocking call that a script probing for
+    registered email addresses could trigger without knowing a single password.
+    """
+    await asyncio.to_thread(burn_password_verification)
 
 
 def generate_opaque_token() -> str:

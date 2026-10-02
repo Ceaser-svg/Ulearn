@@ -19,6 +19,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import security
 from app.core.config import get_settings
 from app.core.security import (
     TOKEN_TYPE_ACCESS,
@@ -277,18 +278,18 @@ async def test_sign_in_burns_argon2_work_for_an_unknown_address(
     """
     await register(client)
     calls = 0
-    original = __import__(
-        "app.services.auth_service", fromlist=["burn_password_verification"]
-    ).burn_password_verification
+    # Patched on `security` rather than on `auth_service`: the service awaits the
+    # async form, which wraps the sync one in a thread. Patching the name the
+    # service imported would be caught by neither the wrapper nor the work it
+    # delegates to.
+    original = security.burn_password_verification
 
     def counting_burn() -> None:
         nonlocal calls
         calls += 1
         original()
 
-    monkeypatch.setattr(
-        "app.services.auth_service.burn_password_verification", counting_burn
-    )
+    monkeypatch.setattr("app.core.security.burn_password_verification", counting_burn)
 
     wrong_password = await client.post(
         LOGIN_URL, json={"email": EMAIL, "password": "not the password"}
