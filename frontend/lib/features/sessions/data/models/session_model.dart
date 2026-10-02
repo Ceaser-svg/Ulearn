@@ -80,7 +80,6 @@ class SessionModel {
     this.startedAt,
     this.endedAt,
     this.durationMinutes = 0,
-    this.sessionPin,
     this.meetingLink,
     this.isRated = false,
   });
@@ -134,7 +133,6 @@ class SessionModel {
       startedAt: _readDateTime(json, 'started_at'),
       endedAt: _readDateTime(json, 'ended_at'),
       durationMinutes: (json['duration_minutes'] as num?)?.toInt() ?? 0,
-      sessionPin: _readString(json, 'session_pin'),
       meetingLink: _readString(json, 'meeting_link'),
       isRated: switch (json['is_rated']) {
         final bool rated => rated,
@@ -186,7 +184,6 @@ class SessionModel {
   /// from a client that reads the payload -- the handshake proves the tutor was
   /// in the room, not that they did not read the API. Recorded here so the
   /// limitation is visible in the one place that could act on it.
-  final String? sessionPin;
 
   /// The meeting link the tutor shared, if any.
   ///
@@ -239,7 +236,6 @@ class SessionModel {
     String? statusWire,
     TutoringSessionStatus? status,
     int? durationMinutes,
-    String? sessionPin,
     String? meetingLink,
     bool? isRated,
   }) {
@@ -256,7 +252,6 @@ class SessionModel {
       startedAt: startedAt,
       endedAt: endedAt,
       durationMinutes: durationMinutes ?? this.durationMinutes,
-      sessionPin: sessionPin ?? this.sessionPin,
       meetingLink: meetingLink ?? this.meetingLink,
       isRated: isRated ?? this.isRated,
       createdAt: createdAt,
@@ -278,8 +273,7 @@ class SessionModel {
           other.startedAt == startedAt &&
           other.endedAt == endedAt &&
           other.durationMinutes == durationMinutes &&
-          other.sessionPin == sessionPin &&
-          other.meetingLink == meetingLink &&
+              other.meetingLink == meetingLink &&
           other.isRated == isRated &&
           other.createdAt == createdAt;
 
@@ -296,7 +290,6 @@ class SessionModel {
     startedAt,
     endedAt,
     durationMinutes,
-    sessionPin,
     meetingLink,
     isRated,
     createdAt,
@@ -330,4 +323,64 @@ DateTime? _readDateTime(Map<String, dynamic> json, String key) {
   final value = json[key];
   if (value == null) return null;
   return DateTime.parse(value as String);
+}
+
+@immutable
+/// The handshake pin, as the tutor reads it out.
+///
+/// Its own type rather than a field on `SessionModel`, because the pin is not
+/// part of a session: it belongs to one party. While it sat on the model, the
+/// tutee's own session screen carried their pin, and the whole handshake could be
+/// completed by one person without the other ever being there.
+class SessionPinModel {
+  const SessionPinModel({
+    required this.sessionId,
+    required this.sessionPin,
+    required this.attemptsRemaining,
+  });
+
+  /// Reads the wire form of `GET /v1/sessions/{id}/pin`.
+  ///
+  /// The pin itself is required. This response exists only to carry it, so its
+  /// absence is a server fault rather than a state to render around -- unlike
+  /// every optional field on `SessionModel`, where absence has a neutral reading.
+  factory SessionPinModel.fromJson(Map<String, dynamic> json) {
+    final sessionId = json['session_id'];
+    final pin = json['session_pin'];
+    if (sessionId is! String || pin is! String) {
+      throw FormatException('PIN response is missing its session or pin', json);
+    }
+    final remaining = json['attempts_remaining'];
+    return SessionPinModel(
+      sessionId: sessionId,
+      sessionPin: pin,
+      // An unknown count is not an emergency: it only drives an advisory, so
+      // reading it as "some attempts left" keeps the tutor from being told a
+      // number the response did not actually carry.
+      attemptsRemaining: remaining is int ? remaining : 0,
+    );
+  }
+
+  final String sessionId;
+  final String sessionPin;
+
+  /// Wrong entries left before the tutee is put on a cooldown.
+  ///
+  /// Shown to the tutor so they can stop guessing on the tutee's behalf. The
+  /// lockout itself is the API's: a ceiling counted on a device is one a student
+  /// clears by reinstalling the app.
+  final int attemptsRemaining;
+
+  @override
+  bool operator ==(Object other) =>
+      other is SessionPinModel &&
+      other.sessionId == sessionId &&
+      other.sessionPin == sessionPin &&
+      other.attemptsRemaining == attemptsRemaining;
+
+  @override
+  int get hashCode => Object.hash(sessionId, sessionPin, attemptsRemaining);
+
+  @override
+  String toString() => 'SessionPinModel($sessionId, attempts: $attemptsRemaining)';
 }

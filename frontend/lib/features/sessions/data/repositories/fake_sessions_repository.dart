@@ -15,10 +15,33 @@ import 'package:peerpass/features/sessions/data/repositories/sessions_repository
 /// really marks the session rated. A fake that returned whatever it was given would
 /// let a screen that never shows the failure -- or shows the wrong one -- pass.
 class FakeSessionsRepository implements SessionsRepository {
-  FakeSessionsRepository({List<SessionModel> sessions = const []})
-    : _sessions = List<SessionModel>.of(sessions);
+  FakeSessionsRepository({
+    List<SessionModel> sessions = const [],
+    Map<String, int> pinFailures = const {},
+  }) : _sessions = List<SessionModel>.of(sessions),
+       _pinFailures = Map<String, int>.of(pinFailures) {
+    // Every session the API creates is issued a PIN, so seeded ones get one too.
+    // Otherwise a tutor-side screen test would fail on "no PIN" for a reason that
+    // has nothing to do with what it is testing.
+    for (final session in _sessions) {
+      _pins.putIfAbsent(session.id, () => '42');
+    }
+  }
 
   final List<SessionModel> _sessions;
+
+  /// Handshake pins, keyed by session id.
+  ///
+  /// Held here rather than on [SessionModel] because that is where the API keeps
+  /// it too: the pin is not part of a session payload, so a session built from
+  /// fake wire data has no pin until one is issued for it.
+  final Map<String, String> _pins = <String, String>{};
+
+  /// Wrong entries per session, so the fake can mirror the API's ceiling.
+  final Map<String, int> _pinFailures;
+
+  /// The ceiling the fake enforces. Mirrors `MAX_PIN_ATTEMPTS` server-side.
+  static const int maxPinAttempts = 5;
 
   /// The tutee a confirmed session is attributed to.
   ///
@@ -110,10 +133,10 @@ class FakeSessionsRepository implements SessionsRepository {
       'duration_minutes': durationMinutes,
       'is_rated': false,
       'created_at': '2026-03-01T08:00:00Z',
-      'session_pin': '42',
       'help_request_id': requestId,
     });
     _sessions.add(created);
+    _pins[created.id] = '42';
     return created;
   }
 
@@ -134,6 +157,19 @@ class FakeSessionsRepository implements SessionsRepository {
   Future<SessionModel> session(String sessionId) async => _require(sessionId);
 
   @override
+  Future<SessionPinModel> revealPin({required String sessionId}) async {
+    final pin = _pins[sessionId];
+    if (pin == null) {
+      throw const ValidationFailure('This session has no handshake PIN.');
+    }
+    return SessionPinModel(
+      sessionId: sessionId,
+      sessionPin: pin,
+      attemptsRemaining: maxPinAttempts - (_pinFailures[sessionId] ?? 0),
+    );
+  }
+
+  @override
   Future<SessionModel> verifyPin({
     required String sessionId,
     required String pin,
@@ -141,15 +177,22 @@ class FakeSessionsRepository implements SessionsRepository {
     pinAttempts.add(pin);
 
     final session = _require(sessionId);
-    final expected = session.sessionPin;
+    final expected = _pins[sessionId];
+    final failures = _pinFailures[sessionId] ?? 0;
+
     // Fails closed the way the API does: a session with no stored pin rejects
     // every candidate, including a blank one.
     if (expected == null || expected.isEmpty || pin.trim() != expected) {
+      _pinFailures[sessionId] = failures + 1;
       throw const ValidationFailure(
         'The session PIN is incorrect.',
         fieldErrors: {'pin': 'incorrect'},
       );
     }
+
+    // Reset on success, as the API does, so one typo does not leave a tutee a
+    // try away from a lockout.
+    _pinFailures.remove(sessionId);
 
     return _replace(
       session.copyWith(

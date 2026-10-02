@@ -35,6 +35,11 @@ class RemoteSessionsRepository implements SessionsRepository {
       _guard(() async => SessionModel.fromJson(await _remote.session(sessionId)));
 
   @override
+  Future<SessionPinModel> revealPin({required String sessionId}) {
+    return _guard(() async => SessionPinModel.fromJson(await _remote.revealPin(sessionId)));
+  }
+
+  @override
   Future<SessionModel> verifyPin({
     required String sessionId,
     required String pin,

@@ -649,14 +649,17 @@ asking "who can take this request" was answered about another course entirely.
 
 ## Sessions
 
-All six routes require a signed-in user and are scoped to the caller's own
+All routes require a signed-in user and are scoped to the caller's own
 sessions; a session the caller is not part of is a 404, not a 403, so the
 response does not confirm that someone else's session exists.
 
 ### `POST /v1/sessions`
 
 Confirms a selected help request and creates the live session. 201 with the
-session, and a generated two-digit `session_pin`.
+session, and a two-digit handshake PIN is issued.
+
+The PIN is **not** in the response. It belongs to the tutor and is read from
+`GET /v1/sessions/{session_id}/pin`; see below for why it is not shared.
 
 ```json
 {
@@ -715,13 +718,47 @@ every call.
 
 ### `POST /v1/sessions/{session_id}/verify-pin`
 
-`{"pin": "42"}` — the tutee submits the code the tutor showed. Moves the session
-to `completed` when the code matches.
+`{"pin": "42"}` — **the tutee submits the code the tutor read out.** Moves the
+session to `in_progress` when the code matches.
 
-Two-digit, and compared for presence rather than authenticity: it is attendance
-evidence that both parties were there, not a secret. A **missing stored PIN is
-refused**, never treated as a match, so a session that never received a code
-cannot be completed by submitting an empty one. A wrong code is a 400.
+The tutee only. A tutor asking here gets a 403: they are the one reading the
+digits aloud, so entering them would prove nothing, and it would let a tutor
+start a session on behalf of a student who never arrived.
+
+Two-digit, so the whole search space is 100 values, which is why attempts are
+counted. After **5** wrong entries the tutee is put on a **15 minute** cooldown
+and every further attempt — including the correct one — is a **429** carrying
+`retry_after_seconds`. The counter is on the session row, not in process memory,
+so it survives a restart and is shared across workers; it is committed on the
+failure path, and reset by a success. A **missing stored PIN is refused**, never
+treated as a match.
+
+### `GET /v1/sessions/{session_id}/pin`
+
+The tutor's half of the handshake: the two digits to read out. **403 for the
+tutee**, because a tutee who could read their own code would have nothing to
+prove. Unavailable once the session has started.
+
+```json
+{
+  "session_id": "9f35…",
+  "session_pin": "42",
+  "attempts_remaining": 5
+}
+```
+
+`attempts_remaining` is advisory, and exists so a tutor can stop a student
+guessing in a room where they are trying to learn. The lockout itself is the
+API's: a ceiling counted on a device is one a student clears by reinstalling the
+app.
+
+### Starting a session
+
+Starting is reachable **only** through `verify-pin`. `POST
+/v1/sessions/{id}/transition` used to accept a `pin` field and check it inline
+with no attempt counter, which made all 100 candidates walkable without touching
+the cooldown; it now refuses `in_progress` and points here. One path means the
+ceiling cannot be circumvented.
 
 ## Ratings
 

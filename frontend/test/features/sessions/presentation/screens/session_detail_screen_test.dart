@@ -39,7 +39,6 @@ const String _sessionId = 'session-1';
 
 SessionModel session({
   String status = 'scheduled',
-  String? sessionPin = '42',
   bool isRated = false,
   String? meetingLink,
   String? endedAt,
@@ -57,7 +56,6 @@ SessionModel session({
     'scheduled_start': '2026-03-04T09:00:00Z',
     'started_at': '2026-03-04T09:05:00Z',
     'ended_at': endedAt,
-    'session_pin': sessionPin,
     'meeting_link': meetingLink,
   });
 }
@@ -161,56 +159,117 @@ void main() {
     });
   });
 
-  group('the handshake, from the tutee side', () {
-    testWidgets('the PIN is hidden until the tutee asks for it', (
+  group('the handshake, from the tutor side', () {
+    testWidgets('the PIN is fetched on demand, not held on the session', (
       tester,
     ) async {
       await _pumpDetail(
         tester,
         FakeSessionsRepository(sessions: [session()]),
-        _tutee,
+        _tutor,
       );
 
-      // A PIN is shown in a room with other people in it. Leaving it on screen for
-      // the rest of the session is a longer exposure than the moment it is needed.
+      // Nothing is on screen until asked for. A PIN is read aloud in a room with
+      // other people in it, and it is fetched rather than carried on the session
+      // because a tutee could otherwise read their own off the same payload.
       expect(find.text('42'), findsNothing);
-      expect(find.text('Reveal PIN'), findsOneWidget);
+      expect(find.text('Show PIN'), findsOneWidget);
 
-      await tester.tap(find.text('Reveal PIN'));
+      await tester.tap(find.text('Show PIN'));
       await _settle(tester);
       expect(find.text('42'), findsOneWidget);
     });
 
-    testWidgets('the tutee cannot type the PIN in themselves', (tester) async {
+    testWidgets('hiding the PIN drops it from the screen', (tester) async {
+      await _pumpDetail(
+        tester,
+        FakeSessionsRepository(sessions: [session()]),
+        _tutor,
+      );
+
+      await tester.tap(find.text('Show PIN'));
+      await _settle(tester);
+      expect(find.text('42'), findsOneWidget);
+
+      await tester.tap(find.text('Hide PIN'));
+      await _settle(tester);
+      expect(find.text('42'), findsNothing);
+    });
+
+    testWidgets('the tutor cannot type the PIN in themselves', (tester) async {
+      await _pumpDetail(
+        tester,
+        FakeSessionsRepository(sessions: [session()]),
+        _tutor,
+      );
+
+      // The API only lets the tutee enter it. Offering the field and having the
+      // server refuse it would teach a tutor that the app offers things it cannot
+      // do, and would invite them to prove nothing by typing digits they read.
+      expect(find.widgetWithText(TextField, 'PIN'), findsNothing);
+      expect(find.text('Start session'), findsNothing);
+    });
+
+    testWidgets('the tutor is warned when the tutee is nearly out of attempts', (
+      tester,
+    ) async {
+      // Four of the five attempts already spent. The advisory is there so a tutor
+      // can stop the student guessing in a room where they are trying to learn,
+      // rather than watch them burn the last one.
+      await _pumpDetail(
+        tester,
+        FakeSessionsRepository(
+          sessions: [session()],
+          pinFailures: {_sessionId: 4},
+        ),
+        _tutor,
+      );
+
+      await tester.tap(find.text('Show PIN'));
+      await _settle(tester);
+
+      expect(find.text('42'), findsOneWidget);
+      expect(find.textContaining('1 attempt left'), findsOneWidget);
+    });
+
+    testWidgets('no warning is shown while attempts remain', (tester) async {
+      await _pumpDetail(
+        tester,
+        FakeSessionsRepository(sessions: [session()]),
+        _tutor,
+      );
+
+      await tester.tap(find.text('Show PIN'));
+      await _settle(tester);
+
+      // Nothing to warn about on a fresh session, so the panel does not cry wolf
+      // on every single one.
+      expect(find.text('42'), findsOneWidget);
+      expect(find.textContaining('attempt'), findsNothing);
+    });
+  });
+
+  group('the handshake, from the tutee side', () {
+    testWidgets('the tutee cannot read their own PIN', (tester) async {
       await _pumpDetail(
         tester,
         FakeSessionsRepository(sessions: [session()]),
         _tutee,
       );
 
-      // The API only lets a tutor verify. Offering the field and having the server
-      // refuse it would teach a student that the app offers things it cannot do.
-      expect(find.widgetWithText(TextField, 'PIN'), findsNothing);
-      expect(find.text('Start session'), findsNothing);
-    });
-
-    testWidgets('a session with no PIN issued says that instead of nothing', (
-      tester,
-    ) async {
-      await _pumpDetail(
-        tester,
-        FakeSessionsRepository(sessions: [session(sessionPin: null)]),
-        _tutee,
-      );
-
-      expect(find.text('No PIN was issued'), findsOneWidget);
+      // The digits are the tutor's to read out. A tutee who could see their own
+      // would have nothing to prove, and the tutor no way to tell an in-person
+      // student from someone guessing two digits on a borrowed account.
+      expect(find.text('Show PIN'), findsNothing);
+      expect(find.text('42'), findsNothing);
+      expect(find.widgetWithText(TextField, 'PIN'), findsOneWidget);
     });
   });
 
-  group('the handshake, from the tutor side', () {
+  group('entering the PIN, from the tutee side', () {
     testWidgets('the right PIN starts the session', (tester) async {
       final repository = FakeSessionsRepository(sessions: [session()]);
-      await _pumpDetail(tester, repository, _tutor);
+      await _pumpDetail(tester, repository, _tutee);
 
       await tester.enterText(find.byType(TextField), '42');
       await _settle(tester);
@@ -218,7 +277,7 @@ void main() {
       await _settle(tester);
 
       expect(repository.pinAttempts, ['42']);
-      // The panel changes rather than disappearing: the tutor needs to know the
+      // The panel changes rather than disappearing: the tutee needs to know the
       // handshake worked, not just that the screen stopped asking.
       expect(find.text('Handshake complete'), findsOneWidget);
     });
@@ -227,7 +286,7 @@ void main() {
       tester,
     ) async {
       final repository = FakeSessionsRepository(sessions: [session()]);
-      await _pumpDetail(tester, repository, _tutor);
+      await _pumpDetail(tester, repository, _tutee);
 
       await tester.enterText(find.byType(TextField), '41');
       await _settle(tester);
@@ -239,7 +298,7 @@ void main() {
       // mismatch behind a guess.
       expect(repository.pinAttempts, ['41']);
       expect(
-        find.text('That is not the right PIN. Ask your student to check it.'),
+        find.text('That is not the right PIN. Ask your tutor to check it.'),
         findsOneWidget,
       );
       expect(find.text('Handshake complete'), findsNothing);
@@ -253,7 +312,7 @@ void main() {
       // connection who mistypes must be able to try again, and a lock the device
       // enforces is one they clear by reinstalling the app.
       final repository = FakeSessionsRepository(sessions: [session()]);
-      await _pumpDetail(tester, repository, _tutor);
+      await _pumpDetail(tester, repository, _tutee);
 
       await tester.enterText(find.byType(TextField), '41');
       await _settle(tester);
@@ -268,6 +327,7 @@ void main() {
       expect(find.text('Handshake complete'), findsOneWidget);
     });
   });
+
 
   group('ending a live session', () {
     testWidgets('the confirmation is what sends it', (tester) async {

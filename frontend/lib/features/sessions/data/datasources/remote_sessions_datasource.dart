@@ -79,12 +79,25 @@ class RemoteSessionsDatasource {
     return response.data!;
   }
 
+  /// Reads the two-digit handshake pin the tutor has to read aloud.
+  ///
+  /// Tutor-only, and it is a separate call rather than a field on the session:
+  /// the pin lives in a payload both parties could otherwise fetch, which would
+  /// leave the tutee able to read their own and skip the handshake entirely.
+  Future<Map<String, dynamic>> revealPin(String sessionId) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/v1/sessions/$sessionId/pin',
+    );
+    return response.data!;
+  }
+
   /// Submits the two-digit handshake pin for a session.
   ///
   /// The dedicated route rather than a transition carrying the pin, because it is
   /// the only move whose precondition is a secret and it deserves a path that says
-  /// so. The API answers a wrong pin with a 400 naming the `pin` field, and leaves
-  /// the session scheduled.
+  /// so. The API answers a wrong pin with a 422 naming the `pin` field, and leaves
+  /// the session scheduled. A 429 means the attempts are spent and the API, not
+  /// this client, decides when trying again is allowed.
   Future<Map<String, dynamic>> verifyPin(
     String sessionId,
     String pin,
