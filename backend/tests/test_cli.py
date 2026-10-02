@@ -213,6 +213,7 @@ async def test_the_cli_main_refuses_a_mismatched_confirmation(
 ) -> None:
     """The two-prompt path must not proceed on a typo."""
     prompts = iter(["one password 12345", "a different one 67890"])
+    monkeypatch.setattr("app.cli.sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("app.cli.getpass.getpass", lambda _prompt: next(prompts))
 
     def _unreachable() -> None:
@@ -228,6 +229,7 @@ async def test_the_cli_main_reports_a_refusal_as_a_nonzero_exit(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A deployment script needs to see failure, not a zero exit and a message."""
+    monkeypatch.setattr("app.cli.sys.stdin.isatty", lambda: True)
     monkeypatch.setattr("app.cli.getpass.getpass", lambda _prompt: "short")
     monkeypatch.setattr("app.cli.asyncio.run", _raise_conflict)
 
@@ -263,3 +265,47 @@ async def test_an_address_the_sign_in_route_would_refuse_is_refused_here(
 
     async with committed_env.session() as db:  # type: ignore[attr-defined]
         assert await load_user_by_email(db, "ops@peerpass.test") is None
+
+
+async def test_the_cli_explains_itself_when_there_is_no_terminal(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """No TTY must produce an instruction, not a traceback out of `getpass`.
+
+    Found by smoke-testing the documented deployment usage: piping the password
+    into the command without `--password-stdin` raised a bare `EOFError` from
+    inside `getpass`, whose traceback says nothing about what to do instead.
+    """
+    monkeypatch.setattr("app.cli.sys.stdin.isatty", lambda: False)
+
+    def _unreachable() -> None:
+        raise AssertionError("the database must not be reached")
+
+    monkeypatch.setattr("app.cli._run_create_admin", _unreachable)
+
+    assert main(["create-admin", "--email", "piped@peerpass.co.ug"]) == 2
+    err = capsys.readouterr().err
+    assert "--password-stdin" in err
+
+
+async def test_an_empty_password_pipe_is_reported_as_such(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A closed pipe must not be reported as a weak password.
+
+    The empty string reaches `denial_reason` as a length complaint, so the
+    operator is sent off to invent a stronger password when the real problem is
+    that nothing was piped in at all.
+    """
+    monkeypatch.setattr("app.cli.sys.stdin.readline", lambda: "\n")
+
+    def _unreachable() -> None:
+        raise AssertionError("the database must not be reached")
+
+    monkeypatch.setattr("app.cli._run_create_admin", _unreachable)
+
+    assert (
+        main(["create-admin", "--email", "piped@peerpass.co.ug", "--password-stdin"])
+        == 2
+    )
+    assert "stdin" in capsys.readouterr().err

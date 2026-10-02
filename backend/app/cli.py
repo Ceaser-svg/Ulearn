@@ -171,6 +171,36 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _read_password_interactively() -> str | None:
+    """Ask for the password twice on a terminal, or explain why it cannot.
+
+    `getpass` on a machine with no terminal -- a container entrypoint, a
+    cloud-init script, a CI step -- does not fail in a way an operator can act
+    on. It raises `EOFError` from inside the read, which surfaces as a bare
+    traceback, and on some builds it falls back to reading the piped value with
+    the terminal echo left on, putting the password into the deploy log.
+
+    Both failure modes matter for the one command whose documented usage *is*
+    unattended provisioning, so the absence of a terminal is detected here and
+    reported as an instruction instead.
+    """
+    if not sys.stdin.isatty():
+        print(
+            "No terminal is available to prompt on.\n"
+            "Pipe the password in and pass --password-stdin:\n"
+            "    python -m app.cli create-admin --email <address> --password-stdin",
+            file=sys.stderr,
+        )
+        return None
+
+    first = getpass.getpass("Password: ")
+    second = getpass.getpass("Confirm password: ")
+    if first != second:
+        print("Passwords did not match.", file=sys.stderr)
+        return None
+    return first
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -178,13 +208,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "create-admin":
         if args.password_stdin:
             args.password = sys.stdin.readline().rstrip("\n")
-        else:
-            first = getpass.getpass("Password: ")
-            second = getpass.getpass("Confirm password: ")
-            if first != second:
-                print("Passwords did not match.", file=sys.stderr)
+            # A closed or empty pipe would otherwise arrive at the password
+            # policy as an empty string and be refused as "too short", which
+            # points an operator at the strength of their password rather than
+            # at the thing that actually went wrong.
+            if not args.password:
+                print("No password was read from stdin.", file=sys.stderr)
                 return 2
-            args.password = first
+        else:
+            password = _read_password_interactively()
+            if password is None:
+                return 2
+            args.password = password
         try:
             return _run_create_admin(args)
         except ValidationProblem as exc:
