@@ -2,8 +2,9 @@
 
 import uuid
 from datetime import datetime
+from typing import Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from app.models.enums import (
     CompetencyStatus,
@@ -11,8 +12,9 @@ from app.models.enums import (
     UserRole,
     VerificationSource,
 )
-from app.schemas.base import OrmSchema, RequestSchema
+from app.schemas.base import OrmSchema, RequestSchema, Trimmed
 from app.schemas.common import Page
+from app.schemas.competency import MAX_EVIDENCE_REFERENCE_LENGTH
 
 
 class AdminUserResponse(OrmSchema):
@@ -70,10 +72,50 @@ class AdminCompetencyPage(Page[AdminCompetencyResponse]):
 
 
 class AdminCompetencyReviewRequest(RequestSchema):
-    """An audited admin decision on a tutor competency."""
+    """An audited admin decision on a tutor competency.
+
+    The two rules below were originally on the student-facing review schema,
+    which was removed: review is an operator action, and an owner reviewing their
+    own submission is not a review at all. They moved here with the route rather
+    than being dropped, because a tutor who is refused with no explanation cannot
+    act on it and will not try again -- and MUST_Pilot_Operations requires a
+    rejection to carry a reason the tutor can act on.
+    """
 
     status: CompetencyStatus
-    rejection_reason: str | None = None
+    rejection_reason: Trimmed | None = Field(
+        default=None,
+        max_length=MAX_EVIDENCE_REFERENCE_LENGTH,
+        description=(
+            "Required when rejecting. Must be something the tutor can act on, "
+            "and must not quote their evidence back at them."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def reason_required_when_rejected(self) -> Self:
+        """A rejection must say why.
+
+        Enforced here rather than in the service so the console gets a
+        field-level message naming `rejection_reason` instead of a 422 that does
+        not say which field was at fault.
+        """
+        if self.status is CompetencyStatus.REJECTED and not (
+            self.rejection_reason and self.rejection_reason.strip()
+        ):
+            raise ValueError("rejection_reason is required when rejecting a competency")
+        return self
+
+    @model_validator(mode="after")
+    def reason_rejected_when_verified(self) -> Self:
+        """A verification carries no rejection reason.
+
+        Not a hard failure -- an operator may be correcting a mistake -- but
+        storing one alongside `verified` would leave a record asserting both.
+        """
+        if self.status is not CompetencyStatus.REJECTED:
+            object.__setattr__(self, "rejection_reason", None)
+        return self
 
 
 class AdminTutorStandingResponse(OrmSchema):

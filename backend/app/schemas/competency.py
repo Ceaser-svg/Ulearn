@@ -9,12 +9,11 @@ fix it, and will simply not try again.
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import Self
 
-from pydantic import Field, model_validator
+from pydantic import Field
 
 from app.models.enums import CompetencyStatus, VerificationSource
-from app.schemas.base import OrmSchema, RequestSchema, Trimmed
+from app.schemas.base import OrmSchema, RequestSchema
 
 MAX_EVIDENCE_REFERENCE_LENGTH = 500
 MAX_NOTES_LENGTH = 2000
@@ -45,45 +44,6 @@ class CompetencyCreate(RequestSchema):
         ),
     )
     notes: str | None = Field(default=None, max_length=MAX_NOTES_LENGTH)
-
-
-class CompetencyReviewRequest(RequestSchema):
-    """An administrator's decision on a pending claim.
-
-    Two shapes in one schema, because the decision and its evidence arrive
-    together and neither is meaningful alone: a rejection with no reason is
-    unactionable, and a verification with a reason is confusing.
-    """
-
-    status: CompetencyStatus
-    rejection_reason: Trimmed | None = Field(
-        default=None, max_length=MAX_EVIDENCE_REFERENCE_LENGTH
-    )
-
-    @model_validator(mode="after")
-    def reason_required_when_rejected(self) -> Self:
-        """A rejection must say why.
-
-        Enforced here rather than in the service so the client gets a field-level
-        message naming `rejection_reason` instead of a 422 with no clue which
-        field was at fault.
-        """
-        if self.status is CompetencyStatus.REJECTED and not (
-            self.rejection_reason and self.rejection_reason.strip()
-        ):
-            raise ValueError("rejection_reason is required when rejecting a competency")
-        return self
-
-    @model_validator(mode="after")
-    def reason_rejected_when_verified(self) -> Self:
-        """A verification carries no rejection reason.
-
-        Not a hard failure -- a reviewer may correct a mistake -- but storing one
-        alongside `verified` would leave a record that says both things.
-        """
-        if self.status is not CompetencyStatus.REJECTED:
-            object.__setattr__(self, "rejection_reason", None)
-        return self
 
 
 class CompetencyResponse(OrmSchema):

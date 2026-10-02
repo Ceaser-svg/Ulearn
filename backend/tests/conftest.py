@@ -8,6 +8,8 @@ be in place first.
 
 import os
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
 
 import pytest
 
@@ -107,6 +109,105 @@ async def db_session(db_engine) -> AsyncIterator[AsyncSession]:
     )
     async with factory() as session:
         yield session
+
+
+@dataclass
+class CommittedEnv:
+    """A client whose requests each get their own session, plus a way in.
+
+    `client` is the HTTP client. `session()` opens a session on the *same*
+    engine, for the cases where a test has to arrange state the API cannot
+    produce on its own -- granting the first admin, say. Anything written that
+    way must be committed by the test, because a rollback is what this fixture
+    exists to expose.
+    """
+
+    client: AsyncClient
+    _factory: async_sessionmaker[AsyncSession]
+
+    @asynccontextmanager
+    async def session(self) -> AsyncIterator[AsyncSession]:
+        async with self._factory() as session:
+            yield session
+
+
+@pytest.fixture
+async def committed_env(tmp_path) -> AsyncIterator[CommittedEnv]:
+    """A client where every request gets its own database session.
+
+    The `client` fixture hands every request the *same* `db_session`. That is a
+    deliberate convenience for tests that stage rows and then read them back, but
+    it has a sharp edge: a service that adds rows and flushes without committing
+    still appears to work, because the flush stays visible inside that shared
+    session's open transaction and the next request is handed the same session.
+
+    Production has no such session. `get_db` opens one per request and closes it
+    at the end, which rolls back anything uncommitted. A suite that only ever
+    exercises `client` therefore cannot tell the difference between a write that
+    is persisted and one that only ever existed inside a transaction -- and a
+    whole product surface can be green against rows no real request would leave
+    behind. That is not hypothetical; see `tests/test_persistence.py`.
+
+    This fixture removes the difference. It overrides `get_db` to build a fresh
+    session per request from an on-disk SQLite database, exactly as production
+    does, so anything not committed by the time the request ends is gone.
+
+    Use it for any test that creates a row over HTTP and then reads it back over
+    HTTP. Use `client` when the test is about a single response body, or when it
+    stages its own rows directly and needs them visible without committing.
+    """
+    from app.core.database import get_db
+    from app.main import create_app
+
+    # On disk rather than `:memory:`. Separate connections to an in-memory SQLite
+    # are separate databases, so per-request sessions would each open a fresh,
+    # empty one and every test using this fixture would fail for the wrong reason.
+    url = f"sqlite+aiosqlite:///{tmp_path / 'committed.db'}"
+    engine = create_async_engine(url)
+    event.listen(engine.sync_engine, "connect", _enable_sqlite_foreign_keys)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    factory = async_sessionmaker(
+        bind=engine, class_=AsyncSession, expire_on_commit=False, autoflush=False
+    )
+
+    # Reference data is seeded the way a real deployment seeds it, in its own
+    # committing session. Without it there are no course units to ask for help
+    # with, and every test here would fail on missing reference data rather than
+    # on the thing it exists to check.
+    from app.db.seed import seed as seed_reference_data
+
+    async with factory() as seed_session:
+        await seed_reference_data(seed_session)
+
+    async def _override_get_db() -> AsyncIterator[AsyncSession]:
+        """Hand the request its own session, and close it when the request ends.
+
+        Closing is the point. It is what turns an uncommitted write into a
+        rollback, which is the behaviour this fixture exists to expose.
+        """
+        async with factory() as session:
+            yield session
+
+    app = create_app()
+    app.dependency_overrides[get_db] = _override_get_db
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    try:
+        async with AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as http_client:
+            yield CommittedEnv(http_client, factory)
+    finally:
+        app.dependency_overrides.clear()
+        await engine.dispose()
+
+
+@pytest.fixture
+async def committed_client(committed_env: CommittedEnv) -> AsyncIterator[AsyncClient]:
+    """The client from `committed_env`, for tests needing no direct database access."""
+    yield committed_env.client
 
 
 @pytest.fixture

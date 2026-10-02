@@ -16,6 +16,7 @@ from app.schemas.academic import (
 from app.schemas.admin import (
     AdminAuditEventPage,
     AdminAuditEventResponse,
+    AdminCompetencyReviewRequest,
     AdminUserPage,
     AdminUserResponse,
 )
@@ -30,7 +31,6 @@ from app.schemas.common import (
 from app.schemas.competency import (
     CompetencyCreate,
     CompetencyResponse,
-    CompetencyReviewRequest,
 )
 from app.schemas.matching import (
     MATCH_EXCLUSION_REASONS,
@@ -84,13 +84,13 @@ __all__ = [
     "RAIL_ENDORSED_UNITS",
     "AdminAuditEventPage",
     "AdminAuditEventResponse",
+    "AdminCompetencyReviewRequest",
     "AdminUserPage",
     "AdminUserResponse",
     "AuthResponse",
     "CertificateEligibilityResponse",
     "CompetencyCreate",
     "CompetencyResponse",
-    "CompetencyReviewRequest",
     "CourseUnitResponse",
     "CurrentUserResponse",
     "GradeResponse",

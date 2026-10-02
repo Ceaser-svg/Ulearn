@@ -111,6 +111,7 @@ async def create_session(
     help_request.status = HelpRequestStatus.MATCHED
     help_request.matched_tutor_id = user.id
     await db.flush()
+    await db.commit()
     await db.refresh(session)
     return await _session_response(db, session)
 
@@ -215,6 +216,7 @@ async def transition_session(
         await rating_service.record_completion(db, session)
 
     await db.flush()
+    await db.commit()
     return await _session_response(db, session)
 
 
@@ -239,6 +241,7 @@ async def verify_session_pin(
     session.status = SessionStatus.IN_PROGRESS
     session.started_at = _utc(session.started_at or datetime.now(UTC))
     await db.flush()
+    await db.commit()
     return await _session_response(db, session)
 
 

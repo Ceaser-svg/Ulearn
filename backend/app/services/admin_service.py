@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.core.exceptions import NotFoundProblem, ValidationProblem
 from app.models.audit import AdminAuditEvent
 from app.models.competency import Competency
+from app.models.course_unit import CourseUnit, University
 from app.models.enums import CompetencyStatus
 from app.models.tutor_profile import TutorProfile
 from app.models.user import User, load_roles
@@ -128,7 +129,9 @@ async def review_competency(
         .where(Competency.public_id == competency_id)
         .options(
             selectinload(Competency.user),
-            selectinload(Competency.course_unit),
+            selectinload(Competency.course_unit)
+            .selectinload(CourseUnit.university)
+            .selectinload(University.grading_scale),
             selectinload(Competency.grade),
         )
     )
@@ -146,6 +149,29 @@ async def review_competency(
             "A rejection reason is required.",
             errors={"rejection_reason": "required when rejecting"},
         )
+    if payload.status is CompetencyStatus.VERIFIED:
+        # MUST invariant 2: a tutor is competent in a unit on a B+ or higher. That
+        # is a property of the record, not a judgement the console is trusted to
+        # make -- the submission path enforces it, and without this check an
+        # operator could verify a B or a D by hand and the two paths would
+        # disagree about what "verified" means. Matching re-checks eligibility
+        # separately, so this is the audit trail being right, not the only guard.
+        scale = row.course_unit.university.grading_scale
+        minimum_points = (
+            scale.competency_min_points if scale is not None else Decimal("0")
+        )
+        if row.grade.grade_points < minimum_points:
+            raise ValidationProblem(
+                "This grade is below the competency threshold for the university, "
+                "so it cannot be verified. Reject it with a reason, or ask the "
+                "tutor to submit a qualifying grade.",
+                errors={
+                    "status": (
+                        f"requires {minimum_points} or higher on the "
+                        f"{scale.name if scale is not None else 'university'} scale"
+                    )
+                },
+            )
     row.reviewed_by_id = actor_id
     row.status = payload.status
     row.rejection_reason = (
