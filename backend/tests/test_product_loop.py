@@ -122,7 +122,15 @@ async def test_the_full_tutoring_loop_records_everything_it_promises(
     session_id = session.json()["id"]
 
     # --- the handshake starts the session --------------------------------
-    pin = session.json()["session_pin"]
+    # The PIN is fetched from the tutor-only endpoint rather than read off the
+    # session payload. It used to be a field on `SessionResponse`, which meant
+    # the tutee could read their own PIN and start the session alone; the tutor
+    # revealing it is what makes the handshake mean anything.
+    pin_response = await client.get(
+        f"/v1/sessions/{session_id}/pin", headers=bearer(tutor)
+    )
+    assert pin_response.status_code == 200, pin_response.text
+    pin = pin_response.json()["session_pin"]
     assert pin, "a session must be issued a handshake PIN"
     started = await client.post(
         f"/v1/sessions/{session_id}/verify-pin",

@@ -7,8 +7,10 @@ from fastapi import APIRouter, status
 from app.api.deps import CurrentUser, DatabaseSession
 from app.schemas.session import (
     SessionCreate,
+    SessionPinResponse,
     SessionResponse,
     SessionTransitionRequest,
+    VerifyPinRequest,
 )
 from app.services import session_service
 
@@ -84,10 +86,30 @@ async def transition_session(
 )
 async def verify_session_pin(
     session_id: uuid.UUID,
-    payload: dict[str, str],
+    payload: VerifyPinRequest,
     caller: CurrentUser,
     db: DatabaseSession,
 ) -> SessionResponse:
-    """Server-side handshake: a tutee reveals the pin; the tutor proves it."""
-    pin = payload.get("pin", "")
-    return await session_service.verify_session_pin(db, caller.user, session_id, pin)
+    """Server-side handshake: the tutor reveals the pin; the tutee enters it."""
+    return await session_service.verify_session_pin(
+        db, caller.user, session_id, payload.pin
+    )
+
+
+@router.get(
+    "/{session_id}/pin",
+    response_model=SessionPinResponse,
+    summary="Read the handshake pin (tutor only)",
+)
+async def reveal_session_pin(
+    session_id: uuid.UUID,
+    caller: CurrentUser,
+    db: DatabaseSession,
+) -> SessionPinResponse:
+    """The tutor's half of the handshake: the digits to read out.
+
+    Separate from `GET /{session_id}` so the PIN is not part of a payload both
+    parties can fetch. The tutee asking here gets a 403: if they could read their
+    own PIN the handshake would prove nothing.
+    """
+    return await session_service.reveal_session_pin(db, caller.user, session_id)

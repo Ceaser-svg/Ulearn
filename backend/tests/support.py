@@ -94,3 +94,95 @@ async def grade_named(client: AsyncClient, label: str) -> dict:
 
 def in_an_hour() -> str:
     return (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+
+
+async def verified_tutor(env: CommittedEnv, email: str) -> dict:
+    """A registered account that is a *verified* tutor, via the real API path.
+
+    Verification is what makes a tutor matchable, so any test that needs one
+    needs this rather than a direct role write: `set_roles({TUTOR})` would leave
+    the competency table empty and the tutor would be proposed for nothing. Goes
+    through the same submit-competency-then-operator-approves sequence a person
+    does.
+    """
+    client = env.client
+    course_unit = await first_course_unit(client)
+    grade = await grade_named(client, "A")
+
+    tutor = await register(client, email)
+    await complete_profile(client, tutor, course_unit_id=course_unit["id"])
+
+    competency = await client.post(
+        "/v1/competencies",
+        headers=bearer(tutor),
+        json={
+            "course_unit_id": course_unit["id"],
+            "grade_id": grade["id"],
+            "source": "transcript",
+            "evidence_reference": "Semester 5 transcript",
+        },
+    )
+    assert competency.status_code == 201, competency.text
+
+    admin = await grant_admin(env, f"admin.for.{email}")
+    review = await client.patch(
+        f"/v1/admin/competencies/{competency.json()['id']}/review",
+        headers=bearer(admin),
+        json={"status": "verified"},
+    )
+    assert review.status_code == 200, review.text
+    return tutor
+
+
+async def scheduled_session(
+    env: CommittedEnv, tutor: dict, student: dict, course_unit: dict
+) -> dict:
+    """Drive matching all the way to a created session, and return its payload.
+
+    Stops at the handshake: the session comes back `scheduled` with a PIN issued,
+    which is the state the PIN tests need to start from.
+    """
+    client = env.client
+    request = await client.post(
+        "/v1/matching/help-requests",
+        headers=bearer(student),
+        json={
+            "course_unit_id": course_unit["id"],
+            "topic": "Diagonalisation of symmetric matrices",
+        },
+    )
+    assert request.status_code == 201, request.text
+    request_id = request.json()["id"]
+
+    matches = await client.post(
+        f"/v1/matching/help-requests/{request_id}/matches",
+        headers=bearer(student),
+        json={"course_unit_id": course_unit["id"]},
+    )
+    assert matches.status_code == 200, matches.text
+
+    tutor_id = (await client.get("/v1/auth/me", headers=bearer(tutor))).json()["id"]
+    assert tutor_id in [
+        item["tutor"]["user_id"] for item in matches.json()["candidates"]
+    ], "the verified tutor was not proposed, so this arrangement proves nothing"
+
+    selected = await client.post(
+        f"/v1/matching/help-requests/{request_id}/select",
+        headers=bearer(student),
+        json={"candidate_tutor_id": tutor_id},
+    )
+    assert selected.status_code == 200, selected.text
+
+    session = await client.post(
+        "/v1/sessions",
+        headers=bearer(tutor),
+        json={
+            "help_request_id": request_id,
+            "course_unit_id": course_unit["id"],
+            "topic": "Diagonalisation of symmetric matrices",
+            "duration_minutes": 60,
+            "scheduled_start": in_an_hour(),
+        },
+    )
+    assert session.status_code == 201, session.text
+    return session.json()

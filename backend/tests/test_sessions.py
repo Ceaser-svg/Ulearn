@@ -94,6 +94,29 @@ async def _seed_session_data(db_session):
     return student, tutor, course_unit
 
 
+async def _stored_pin(db_session, public_id) -> str:
+    """The PIN as stored, for tests that need to act the handshake out.
+
+    `create_session` returns a `SessionResponse`, and the PIN is no longer on it:
+    it was readable by both parties, so the tutee could read their own and start
+    the session alone. Reaching for the row keeps these tests on the side of the
+    handshake that is allowed to know it, and makes that the only way to learn it.
+    """
+    row = await db_session.scalar(select(Session).where(Session.public_id == public_id))
+    assert row is not None and row.session_pin is not None
+    return row.session_pin
+
+
+async def _start_session(db_session, session, student, pin=None):
+    """Begin a session the way a client now must: the tutee enters the PIN."""
+    return await session_service.verify_session_pin(
+        db_session,
+        student,
+        session.id,
+        pin if pin is not None else await _stored_pin(db_session, session.id),
+    )
+
+
 async def test_create_session_from_help_request_and_generate_pin(db_session):
     student, tutor, course_unit = await _seed_session_data(db_session)
     request = await matching_service.create_help_request(
@@ -133,7 +156,8 @@ async def test_create_session_from_help_request_and_generate_pin(db_session):
     assert session.tutee_id == student.public_id
     assert session.tutor_id == tutor.public_id
     assert session.status is SessionStatus.SCHEDULED
-    assert session.session_pin is not None and len(session.session_pin) == 2
+    # Issued, but not on the response: see `_stored_pin`.
+    assert len(await _stored_pin(db_session, session.id)) == 2
     assert session.meeting_link == "https://meet.google.com/demo"
 
     refreshed = await db_session.scalar(
@@ -179,28 +203,20 @@ async def test_starting_a_session_requires_the_correct_pin(db_session):
     # range 00-99. Any two candidates are wrong only 98 times in 100, and a
     # single conditional is still wrong whenever the draw lands on it, so search
     # the space for a value the session cannot be using instead of guessing.
+    stored = await _stored_pin(db_session, created.id)
     wrong_pin = next(
         candidate
         for candidate in (f"{n:02d}" for n in range(100))
-        if candidate != created.session_pin
+        if candidate != stored
     )
 
+    # The tutee enters it, so the wrong candidate is offered by `student`.
     with pytest.raises(ValidationProblem, match="PIN"):
-        await session_service.transition_session(
-            db_session,
-            tutor,
-            created.id,
-            SessionTransitionRequest(status=SessionStatus.IN_PROGRESS, pin=wrong_pin),
+        await session_service.verify_session_pin(
+            db_session, student, created.id, wrong_pin
         )
 
-    started = await session_service.transition_session(
-        db_session,
-        tutor,
-        created.id,
-        SessionTransitionRequest(
-            status=SessionStatus.IN_PROGRESS, pin=created.session_pin
-        ),
-    )
+    started = await _start_session(db_session, created, student)
 
     assert started.status is SessionStatus.IN_PROGRESS
     assert started.started_at is not None
@@ -251,13 +267,13 @@ async def test_a_session_without_a_stored_pin_rejects_every_candidate(db_session
     )
     await db_session.commit()
 
-    # `SessionTransitionRequest.pin` is a `Trimmed` field, so a blank pin is
-    # already refused by the schema. The path that still had to fail closed is
-    # `verify_session_pin`, which takes a raw string from the route.
+    # `VerifyPinRequest.pin` is bounded and trimmed by the schema at the route, so
+    # a blank pin is refused before it arrives. The path that still has to fail
+    # closed is the service, which is called directly here.
     for candidate in ("", "  ", "  \t ", "42"):
         with pytest.raises(ValidationProblem, match="PIN"):
             await session_service.verify_session_pin(
-                db_session, tutor, created.id, candidate
+                db_session, student, created.id, candidate
             )
 
 
@@ -293,7 +309,10 @@ async def test_the_correct_pin_is_accepted_despite_surrounding_whitespace(db_ses
     )
 
     started = await session_service.verify_session_pin(
-        db_session, tutor, created.id, f"  {created.session_pin}  "
+        db_session,
+        student,
+        created.id,
+        f"  {await _stored_pin(db_session, created.id)}  ",
     )
 
     assert started.status is SessionStatus.IN_PROGRESS
@@ -333,14 +352,7 @@ async def test_marking_a_session_complete_stops_the_clock(db_session):
         ),
     )
 
-    started = await session_service.transition_session(
-        db_session,
-        tutor,
-        created.id,
-        SessionTransitionRequest(
-            status=SessionStatus.IN_PROGRESS, pin=created.session_pin
-        ),
-    )
+    started = await _start_session(db_session, created, student)
     completed = await session_service.transition_session(
         db_session,
         tutor,
@@ -414,14 +426,7 @@ async def test_completing_through_the_lifecycle_banks_minutes_and_counts_the_ses
                 duration_minutes=30,
             ),
         )
-        started = await session_service.transition_session(
-            db_session,
-            tutor,
-            created.id,
-            SessionTransitionRequest(
-                status=SessionStatus.IN_PROGRESS, pin=created.session_pin
-            ),
-        )
+        started = await _start_session(db_session, created, student)
         completed = await session_service.transition_session(
             db_session,
             tutor,
@@ -474,14 +479,7 @@ async def test_a_session_is_banked_once_even_across_repeated_calls(db_session):
             duration_minutes=45,
         ),
     )
-    started = await session_service.transition_session(
-        db_session,
-        tutor,
-        created.id,
-        SessionTransitionRequest(
-            status=SessionStatus.IN_PROGRESS, pin=created.session_pin
-        ),
-    )
+    started = await _start_session(db_session, created, student)
     completed = await session_service.transition_session(
         db_session,
         tutor,

@@ -124,6 +124,34 @@ class NotFoundProblem(ProblemException):
         )
 
 
+class TooManyRequestsProblem(ProblemException):
+    """Too many attempts, and the caller has to wait.
+
+    A distinct 429 rather than a 403 so a client can tell "you are not allowed"
+    from "you are not allowed *yet*": the first needs a different account, the
+    second needs patience. Collapsing them teaches every client to log the user
+    out on a lockout.
+    """
+
+    def __init__(
+        self,
+        detail: str = "Too many attempts. Try again shortly.",
+        *,
+        retry_after_seconds: int | None = None,
+    ) -> None:
+        super().__init__(
+            detail,
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            title="Too many requests",
+            code="too_many_requests",
+            errors=(
+                {"retry_after_seconds": str(retry_after_seconds)}
+                if retry_after_seconds is not None
+                else None
+            ),
+        )
+
+
 class ConflictProblem(ProblemException):
     """The request collided with existing state.
 
