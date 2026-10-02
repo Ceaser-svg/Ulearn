@@ -181,6 +181,22 @@ class Settings(BaseSettings):
         ),
     )
 
+    password_hash_max_concurrency: int = Field(
+        default=4,
+        ge=1,
+        le=64,
+        description=(
+            "How many password hashes may be computed at once, per process. "
+            "This is a memory setting, not a throughput one: each concurrent "
+            "hash holds roughly `password_hash_memory_kib` of resident memory "
+            "for its duration, so the ceiling is what stops a burst of sign-in "
+            "attempts from becoming an out-of-memory kill instead of a slow "
+            "response. Beyond this, hashing queues. Raise it on an instance "
+            "that has the RAM for it; the calculation is "
+            "max_concurrency * memory_kib against the container's limit."
+        ),
+    )
+
     # --- Transport ----------------------------------------------------------
 
     cors_origins: PlainStringList = Field(

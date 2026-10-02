@@ -9,7 +9,9 @@ import asyncio
 import os
 import re
 import threading
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
@@ -615,3 +617,71 @@ async def test_the_event_loop_keeps_serving_requests_during_a_hash() -> None:
         spinner.cancel()
 
     assert ticks > before
+
+
+async def test_concurrent_hashes_are_capped_rather_than_all_held_at_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The cap is a memory ceiling, so it has to be observable, not merely set.
+
+    At 19 MiB a concurrent hash, a pool that grows with the number of waiting
+    requests does not rate-limit anything -- it just decides the order in which
+    the out-of-memory kill arrives. Four workers must stay four workers however
+    many sign-ins are queued behind them.
+    """
+    from app.core import security as security_module
+
+    # One pool, created here. Returning a fresh executor from the patched
+    # callable would hand every waiting request its own pair of workers and
+    # measure nothing.
+    pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="argon2-test")
+    monkeypatch.setattr(security_module, "_argon2_executor", lambda: pool)
+    concurrent = 0
+    peak = 0
+    lock = threading.Lock()
+
+    def _counting_hash(_password: str) -> str:
+        nonlocal concurrent, peak
+        with lock:
+            concurrent += 1
+            peak = max(peak, concurrent)
+        time.sleep(0.02)
+        with lock:
+            concurrent -= 1
+        return "$argon2id$fake"
+
+    monkeypatch.setattr("app.core.security.hash_password", _counting_hash)
+
+    try:
+        await asyncio.gather(*(hash_password_async("a password") for _ in range(12)))
+    finally:
+        pool.shutdown(wait=True)
+
+    assert peak <= 2
+
+
+async def test_the_pool_size_follows_the_setting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ceiling must be configurable, because it is an instance-size decision.
+
+    The calculation is `password_hash_max_concurrency * password_hash_memory_kib`
+    against the container's memory limit. A fixed number is right for one
+    instance and wrong for every other.
+    """
+    from app.core import security as security_module
+
+    monkeypatch.setenv("PASSWORD_HASH_MAX_CONCURRENCY", "7")
+    # Both caches matter: the settings singleton may already hold values from an
+    # earlier test, and the pool is memoised on the first call, so a cleared
+    # settings cache alone still hands back the pool built at the old size.
+    get_settings.cache_clear()
+    security_module._argon2_executor.cache_clear()
+
+    executor = security_module._argon2_executor()
+    try:
+        assert executor._max_workers == 7
+    finally:
+        executor.shutdown(wait=True)
+        security_module._argon2_executor.cache_clear()
+        get_settings.cache_clear()

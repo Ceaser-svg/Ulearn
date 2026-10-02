@@ -7,12 +7,15 @@ without touching a service.
 """
 
 import asyncio
+import atexit
 import contextlib
 import hashlib
 import hmac
 import secrets
 import sys
 import uuid
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
@@ -237,31 +240,62 @@ def password_needs_rehash(stored: str) -> bool:
 # not to make it async -- it is to not run it on the thread whose job is to
 # serve everyone else.
 #
-# Hashing sign-up or signing in cost ~50ms of CPU and 19 MiB of resident memory
-# per call. On the event loop that is not 50ms for the one person signing in; it
-# is 50ms during which *every* concurrent request in the process is not being
-# served, including the requests that are not signing in. A handful of people
-# signing in at once is the entire API stalling, and it looks in the metrics like
-# general slowness rather than like the cause.
+# Hashing sign-up or signing in costs ~100ms of CPU and 19 MiB of resident
+# memory per call. On the event loop that is not 100ms for the one person
+# signing in; it is 100ms during which *every* concurrent request in the process
+# is not being served, including the requests that are not signing in. A handful
+# of people signing in at once is the entire API stalling, and it looks in the
+# metrics like general slowness rather than like the cause.
 #
-# `asyncio.to_thread` is the right size of tool here, and the GIL is not a
-# problem: `argon2-cffi` computes in Rust and releases the GIL for the duration
-# of the hash, so these threads genuinely run in parallel.
+# The GIL is not a problem: `argon2-cffi` computes in Rust and releases the GIL
+# for the duration of the hash, so worker threads genuinely run in parallel.
 #
-# The one thing `to_thread` does *not* do is bound how many run at once, and 19
-# MiB each means unbounded concurrency is an out-of-memory kill. The rate
-# limiter in `app.core.rate_limit` is what caps it.
+# Measured on the sign-in path, worst gap between two event-loop turns while one
+# real login completed: 80.5ms blocking, 16.7ms here. The remainder is database
+# round-trip, not hashing.
 # ---------------------------------------------------------------------------
+
+
+# `to_thread` also does not bound how many run at once, and 19 MiB each means
+# unbounded concurrency is an out-of-memory kill rather than a slow response: the
+# requests queue in the executor rather than each taking its own 19 MiB.
+# `asyncio.to_thread`'s default pool is `min(32, cpu_count + 4)` threads, which
+# on a 12-core machine is a 228 MiB spike from sign-in alone.
+#
+# A dedicated pool sized by configuration is used instead. It is module-level
+# rather than per-loop so that it survives the short-lived event loop each test
+# creates -- `asyncio.to_thread` would build a fresh default executor per loop.
+#
+# Queuing is the intended behaviour under burst, not an oversight: it converts a
+# memory exhaustion into latency, which the rate limiter upstream then keeps
+# bounded.
+@lru_cache(maxsize=1)
+def _argon2_executor() -> ThreadPoolExecutor:
+    max_workers = get_settings().password_hash_max_concurrency
+    executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="argon2")
+    # Interpreter shutdown joins the pool's threads by default. Registering this
+    # explicitly means a busy hash does not keep the process alive past the end
+    # of a script, and that the threads are asked to stop before the interpreter
+    # starts tearing down the runtime they were using.
+    atexit.register(executor.shutdown, wait=True, cancel_futures=True)
+    return executor
+
+
+async def _off_the_loop[T](function: Callable[..., T], /, *args: Any) -> T:
+    """Run a blocking function on the bounded Argon2 pool."""
+    return await asyncio.get_running_loop().run_in_executor(
+        _argon2_executor(), function, *args
+    )
 
 
 async def hash_password_async(password: str) -> str:
     """[hash_password] without holding the event loop for the duration."""
-    return await asyncio.to_thread(hash_password, password)
+    return await _off_the_loop(hash_password, password)
 
 
 async def verify_password_async(password: str, stored: str) -> bool:
     """[verify_password] without holding the event loop for the duration."""
-    return await asyncio.to_thread(verify_password, password, stored)
+    return await _off_the_loop(verify_password, password, stored)
 
 
 async def burn_password_verification_async() -> None:
@@ -271,7 +305,7 @@ async def burn_password_verification_async() -> None:
     the address, so it was the one blocking call that a script probing for
     registered email addresses could trigger without knowing a single password.
     """
-    await asyncio.to_thread(burn_password_verification)
+    await _off_the_loop(burn_password_verification)
 
 
 def generate_opaque_token() -> str:
