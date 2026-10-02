@@ -7,6 +7,7 @@ be in place first.
 """
 
 import os
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -24,7 +25,7 @@ os.environ.setdefault("JWT_ALGORITHM", "HS256")
 os.environ.setdefault("TOKEN_PEPPER", _SUITE_TOKEN_PEPPER)
 
 from httpx import ASGITransport, AsyncClient  # noqa: E402
-from sqlalchemy import event  # noqa: E402
+from sqlalchemy import event, text  # noqa: E402
 from sqlalchemy.ext.asyncio import (  # noqa: E402
     AsyncSession,
     async_sessionmaker,
@@ -149,8 +150,17 @@ async def committed_env(tmp_path) -> AsyncIterator[CommittedEnv]:
     behind. That is not hypothetical; see `tests/test_persistence.py`.
 
     This fixture removes the difference. It overrides `get_db` to build a fresh
-    session per request from an on-disk SQLite database, exactly as production
-    does, so anything not committed by the time the request ends is gone.
+    session per request, exactly as production does, so anything not committed by
+    the time the request ends is gone.
+
+    It follows `PEERPASS_TEST_DATABASE_URL` rather than always using SQLite. That
+    matters because these are the tests that assert the suite's own blind spot is
+    gone, and running them only against SQLite would mean the blind spot could
+    still hide anything where SQLite and PostgreSQL disagree.
+
+    Isolation is a fresh temporary file database, or a fresh schema on PostgreSQL.
+    Not the shared test database: this fixture needs its own, because a test that
+    used both would have one fixture's `drop_all` destroy the other's rows.
 
     Use it for any test that creates a row over HTTP and then reads it back over
     HTTP. Use `client` when the test is about a single response body, or when it
@@ -159,14 +169,37 @@ async def committed_env(tmp_path) -> AsyncIterator[CommittedEnv]:
     from app.core.database import get_db
     from app.main import create_app
 
-    # On disk rather than `:memory:`. Separate connections to an in-memory SQLite
-    # are separate databases, so per-request sessions would each open a fresh,
-    # empty one and every test using this fixture would fail for the wrong reason.
-    url = f"sqlite+aiosqlite:///{tmp_path / 'committed.db'}"
-    engine = create_async_engine(url)
-    event.listen(engine.sync_engine, "connect", _enable_sqlite_foreign_keys)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
+    if TEST_DATABASE_URL:
+        schema = f"committed_{uuid.uuid4().hex[:12]}"
+        engine = create_async_engine(TEST_DATABASE_URL)
+        # A per-test schema rather than a per-test database: `CREATE DATABASE`
+        # cannot run inside a transaction and is far too slow to do once per
+        # test. `search_path` confines every statement this engine issues.
+        async with engine.begin() as connection:
+            await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+            await connection.execute(text(f'SET search_path TO "{schema}"'))
+            await connection.run_sync(Base.metadata.create_all)
+        teardown_schema = schema
+    else:
+        # On disk rather than `:memory:`. Separate connections to an in-memory
+        # SQLite are separate databases, so per-request sessions would each open
+        # a fresh, empty one and every test would fail for the wrong reason.
+        engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'committed.db'}")
+        event.listen(engine.sync_engine, "connect", _enable_sqlite_foreign_keys)
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        teardown_schema = None
+
+    # `search_path` is per-connection, and a pooled engine hands out connections
+    # the override below did not visit. Set it on connect so every session this
+    # factory creates is confined to this test's schema.
+    if teardown_schema is not None:
+
+        @event.listens_for(engine.sync_engine, "connect")
+        def _set_search_path(dbapi_connection, _record) -> None:
+            cursor = dbapi_connection.cursor()
+            cursor.execute(f'SET search_path TO "{teardown_schema}"')
+            cursor.close()
 
     factory = async_sessionmaker(
         bind=engine, class_=AsyncSession, expire_on_commit=False, autoflush=False
@@ -201,6 +234,11 @@ async def committed_env(tmp_path) -> AsyncIterator[CommittedEnv]:
             yield CommittedEnv(http_client, factory)
     finally:
         app.dependency_overrides.clear()
+        if teardown_schema is not None:
+            async with engine.begin() as connection:
+                await connection.execute(
+                    text(f'DROP SCHEMA "{teardown_schema}" CASCADE')
+                )
         await engine.dispose()
 
 
