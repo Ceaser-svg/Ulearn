@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
@@ -12,18 +14,30 @@ plugins {
 // can never be updated: the store rejects every later build because the signing
 // identity changed. That failure appears long after the mistake, on a device we
 // do not control, so it is worth failing here instead.
-val releaseStorePath: String? =
-    (project.findProperty("PEERPASS_KEYSTORE") as String?)
-        ?: System.getenv("PEERPASS_KEYSTORE")
-val releaseStorePassword: String? =
-    (project.findProperty("PEERPASS_KEYSTORE_PASSWORD") as String?)
-        ?: System.getenv("PEERPASS_KEYSTORE_PASSWORD")
-val releaseKeyAlias: String? =
-    (project.findProperty("PEERPASS_KEY_ALIAS") as String?)
-        ?: System.getenv("PEERPASS_KEY_ALIAS")
-val releaseKeyPassword: String? =
-    (project.findProperty("PEERPASS_KEY_PASSWORD") as String?)
-        ?: System.getenv("PEERPASS_KEY_PASSWORD")
+//
+// `key.properties` has to be loaded explicitly. Gradle reads `gradle.properties`
+// on its own and nothing else, so without this block the file named in the error
+// message below would be silently ignored and the documented way of configuring
+// a release build would not work.
+val keyProperties = Properties().apply {
+    val keyPropertiesFile = rootProject.file("key.properties")
+    if (keyPropertiesFile.exists()) {
+        keyPropertiesFile.inputStream().use { load(it) }
+    }
+}
+
+// A Gradle property wins over the environment, which wins over the file, so a
+// one-off CI invocation can override the developer's local file without editing
+// it.
+fun signingValue(name: String): String? =
+    (project.findProperty(name) as String?)
+        ?: System.getenv(name)
+        ?: keyProperties.getProperty(name)
+
+val releaseStorePath: String? = signingValue("PEERPASS_KEYSTORE")
+val releaseStorePassword: String? = signingValue("PEERPASS_KEYSTORE_PASSWORD")
+val releaseKeyAlias: String? = signingValue("PEERPASS_KEY_ALIAS")
+val releaseKeyPassword: String? = signingValue("PEERPASS_KEY_PASSWORD")
 
 val hasReleaseSigningMaterial = listOf(
     releaseStorePath,
