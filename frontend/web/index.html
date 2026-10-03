@@ -16,6 +16,20 @@
   -->
   <base href="$FLUTTER_BASE_HREF">
 
+  <!--
+    SPA routing: this app routes on the client, so a static host that serves
+    files literally will 404 on any deep link or refresh (`/sessions/123`).
+    Nothing in this repository can fix that, because the behaviour belongs to
+    the host. The host must serve index.html for any path that is not a real
+    file — nginx `try_files $uri $uri/ /index.html;`, Netlify/Vercel/Firebase
+    a rewrite of `/*` to `/index.html`, Apache `FallbackResource /index.html`,
+    or a GitHub Pages 404.html that redirects to the base path.
+
+    Recorded in docs/MVP_Operations.md. Do not "fix" a 404 by adding real
+    directories here; that produces a site where only the routes that happen to
+    have a directory survive.
+  -->
+
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="PeerPass connects university students with verified peer tutors for focused, stigma-free academic support.">
