@@ -53,6 +53,13 @@ def create_app() -> FastAPI:
             404: {"content": {PROBLEM_CONTENT_TYPE: {}}},
             409: {"content": {PROBLEM_CONTENT_TYPE: {}}},
             422: {"content": {PROBLEM_CONTENT_TYPE: {}}},
+            # Declared so the generated clients know a retry is expected and that
+            # `Retry-After` carries the wait. A 429 that appears only at runtime
+            # teaches a generated client to treat a rate limit as a hard failure.
+            429: {
+                "content": {PROBLEM_CONTENT_TYPE: {}},
+                "headers": {"Retry-After": {"schema": {"type": "integer"}}},
+            },
         },
     )
 
@@ -106,6 +113,10 @@ def _register_exception_handlers(application: FastAPI) -> None:
             status_code=exc.status_code,
             content=exc.to_problem(instance=str(request.url.path)),
             media_type=PROBLEM_CONTENT_TYPE,
+            # Problem exceptions can require headers of their own -- a 429's
+            # `Retry-After`. `ProblemException.headers` is empty by default, so
+            # this is a no-op for every error that does not need one.
+            headers=exc.headers or None,
         )
 
     @application.exception_handler(RequestValidationError)

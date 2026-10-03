@@ -18,7 +18,7 @@ nothing here decides a password policy -- `app.core.password_policy` owns that.
 """
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -30,6 +30,7 @@ from app.core.exceptions import (
     AuthenticationProblem,
     ConflictProblem,
     NotFoundProblem,
+    TooManyRequestsProblem,
     ValidationProblem,
 )
 from app.core.password_policy import denial_reason
@@ -53,6 +54,7 @@ from app.schemas.user import (
     TokenResponse,
     UpdateProfileRequest,
 )
+from app.services import rate_limit
 
 #: One message for every sign-in failure.
 #:
@@ -243,7 +245,9 @@ async def _load_user_by_id(db: AsyncSession, user_id: uuid.UUID) -> User | None:
 # --- registration ----------------------------------------------------------
 
 
-async def register(db: AsyncSession, request: RegisterRequest) -> AuthResponse:
+async def register(
+    db: AsyncSession, request: RegisterRequest, *, client_address: str
+) -> AuthResponse:
     """Create an account and sign the new student straight in.
 
     The account starts with no name. Sign-up asks for an email and a password
@@ -260,7 +264,22 @@ async def register(db: AsyncSession, request: RegisterRequest) -> AuthResponse:
       slow as 19 MiB of Argon2 for one that does not. That difference is
       measurable over a network, and this endpoint is the one place an attacker
       holding a list of student addresses gets to time a request per address.
+
+    The throttle check comes before all of it, because that is what stops the
+    endpoint being used to buy CPU: one accepted sign-up costs a full Argon2
+    hash, so an unthrottled registration endpoint is a way to spend this
+    instance's memory budget at will.
     """
+    settings = get_settings()
+    wait = await rate_limit.lock_remaining(
+        db, rate_limit.SCOPE_REGISTER_IP, client_address
+    )
+    if wait:
+        raise rate_limit.refuse(
+            "Too many accounts created from this network. Try again later.",
+            wait,
+        )
+
     reason = denial_reason(request.password)
     if reason is not None:
         raise ValidationProblem(
@@ -292,6 +311,17 @@ async def register(db: AsyncSession, request: RegisterRequest) -> AuthResponse:
     # is what the provisional-to-verified path is for.
     await set_roles(db, user.id, {UserRole.STUDENT})
 
+    # Charged on success, so the ceiling is on accounts *created* from one
+    # address rather than on sign-up attempts. A typo'd address does not consume
+    # a student's budget, and neither does an attacker who replays one.
+    await rate_limit.record_failure(
+        db,
+        rate_limit.SCOPE_REGISTER_IP,
+        client_address,
+        max_attempts=settings.auth_register_ip_max_attempts,
+        lockout=timedelta(seconds=settings.auth_register_ip_lockout_seconds),
+    )
+
     response = await _issue_tokens(db, user)
     await db.commit()
     return response
@@ -300,11 +330,13 @@ async def register(db: AsyncSession, request: RegisterRequest) -> AuthResponse:
 # --- sign-in ---------------------------------------------------------------
 
 
-async def authenticate(db: AsyncSession, request: LoginRequest) -> AuthResponse:
+async def authenticate(
+    db: AsyncSession, request: LoginRequest, *, client_address: str
+) -> AuthResponse:
     """Exchange credentials for a token pair.
 
-    Every rejection below is the same exception with the same message, and each
-    one costs the same Argon2 work:
+    Every credentials rejection below is the same exception with the same
+    message, and each one costs the same Argon2 work:
 
     - No such user: `burn_password_verification` runs a verification against a
       decoy hash, so this path takes as long as a wrong password.
@@ -313,13 +345,38 @@ async def authenticate(db: AsyncSession, request: LoginRequest) -> AuthResponse:
     - Deactivated account: verified first, so this path is the wrong-password
       path. A student locked out for a policy reason learns nothing they could
       not already learn by guessing.
+
+    The rate-limit checks run *before* the Argon2 work, which is the whole point
+    of having them: a throttled address costs a database read rather than 19 MiB
+    of hashing, so the limiter is a CPU saving as much as a security control.
+
+    The order of the two checks is deliberate. The address is checked first
+    because it is the ceiling that bounds *this* caller regardless of which
+    account they name, and checking it first means a spraying attack is stopped
+    before it can create a lockout artifact on a hundred innocent accounts.
     """
-    user = await load_user_by_email(db, request.email)
+    email = normalise_email(request.email)
+
+    address_wait = await rate_limit.lock_remaining(
+        db, rate_limit.SCOPE_LOGIN_IP, client_address
+    )
+    if address_wait:
+        raise _throttled(address_wait)
+
+    account_wait = await rate_limit.lock_remaining(
+        db, rate_limit.SCOPE_LOGIN_ACCOUNT, email
+    )
+    if account_wait:
+        raise _throttled(account_wait)
+
+    user = await load_user_by_email(db, email)
     if user is None:
         await burn_password_verification_async()
+        await _count_failure(db, client_address, email)
         raise _credentials_rejected()
 
     if not await verify_password_async(request.password, user.password_hash):
+        await _count_failure(db, client_address, email)
         raise _credentials_rejected()
 
     if not user.is_active:
@@ -341,9 +398,52 @@ async def authenticate(db: AsyncSession, request: LoginRequest) -> AuthResponse:
         # its owner signs in.
         user.password_hash = await hash_password_async(request.password)
 
+    # A student who fat-fingers their password twice and then remembers it must
+    # not carry those two failures forward, so the account counter is cleared
+    # here. The address counter deliberately is not: see `app.services.rate_limit`.
+    await rate_limit.reset(db, rate_limit.SCOPE_LOGIN_ACCOUNT, email)
+
     response = await _issue_tokens(db, user)
     await db.commit()
     return response
+
+
+def _throttled(retry_after_seconds: int) -> TooManyRequestsProblem:
+    return rate_limit.refuse(
+        "Too many sign-in attempts. Wait before trying again.",
+        retry_after_seconds,
+    )
+
+
+async def _count_failure(db: AsyncSession, client_address: str, email: str) -> None:
+    """Charge one failed sign-in to both counters, and persist that.
+
+    The address counter is charged whether or not the address has an account.
+    An attacker guessing against addresses that do not exist is still an attacker
+    spending CPU on this service, and the decoy burn above makes each attempt
+    cost the same either way.
+
+    Committed here rather than left to the caller's error path, which raises
+    immediately afterwards. `get_db` rolls back on an unhandled exception, so an
+    uncommitted counter is discarded on exactly the attempts that were meant to
+    count.
+    """
+    settings = get_settings()
+    await rate_limit.record_failure(
+        db,
+        rate_limit.SCOPE_LOGIN_ACCOUNT,
+        email,
+        max_attempts=settings.auth_login_max_attempts,
+        lockout=timedelta(seconds=settings.auth_login_lockout_seconds),
+    )
+    await rate_limit.record_failure(
+        db,
+        rate_limit.SCOPE_LOGIN_IP,
+        client_address,
+        max_attempts=settings.auth_login_ip_max_attempts,
+        lockout=timedelta(seconds=settings.auth_login_ip_lockout_seconds),
+    )
+    await db.commit()
 
 
 # --- refresh ---------------------------------------------------------------

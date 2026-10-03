@@ -6,11 +6,12 @@ and cached. Clearing that cache is therefore not enough; the variables have to
 be in place first.
 """
 
+import itertools
 import os
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pytest
 
@@ -125,15 +126,71 @@ class CommittedEnv:
 
     client: AsyncClient
     _factory: async_sessionmaker[AsyncSession]
+    _app: object = None
+    _extra: list[AsyncClient] = field(default_factory=list)
 
     @asynccontextmanager
     async def session(self) -> AsyncIterator[AsyncSession]:
         async with self._factory() as session:
             yield session
 
+    def from_address(self, address: str) -> AsyncClient:
+        """The same database, arriving from a different client address.
+
+        Two addresses in one test cannot be two fixture instances: each builds
+        its own database, so the second would be talking to an empty one. A test
+        about one address not punishing another needs both in a single place.
+        """
+        client = AsyncClient(
+            transport=ASGITransport(
+                app=self._app, raise_app_exceptions=False, client=(address, 51234)
+            ),
+            base_url="http://testserver",
+        )
+        self._extra.append(client)
+        return client
+
+    async def aclose(self) -> None:
+        for client in self._extra:
+            await client.aclose()
+
+
+#: Hands out one client address per call, so tests do not share a rate-limit
+#: bucket by accident.
+#:
+#: Without this the limiter sees `request.client is None` -- `ASGITransport`
+#: leaves the ASGI scope's client unset -- and every request in the suite lands
+#: under `UNKNOWN_CLIENT`. A handful of tests deliberately failing sign-in would
+#: then lock out every other test that signs in, and the failure would appear
+#: dozens of files away from its cause.
+_client_addresses = itertools.count(1)
+
+
+def unique_client_address() -> str:
+    """A client address no other test will use."""
+    n = next(_client_addresses)
+    return f"10.99.{(n >> 8) % 256}.{n % 256}"
+
 
 @pytest.fixture
-async def committed_env(tmp_path) -> AsyncIterator[CommittedEnv]:
+def client_address() -> str:
+    """Where this test's requests appear to come from.
+
+    Overridable: a test about the limiter needs to arrive from a known address,
+    which it does by depending on this fixture directly or by asking for
+    `@pytest.mark.parametrize("client_address", [...], indirect=True)`.
+    """
+    return unique_client_address()
+
+
+@pytest.fixture
+async def committed_env(tmp_path, client_address) -> AsyncIterator[CommittedEnv]:
+    """As documented above, addressed from a bucket of its own."""
+    async for env in _env_from_address(tmp_path, client_address):
+        yield env
+
+
+async def _env_from_address(tmp_path, address) -> AsyncIterator[CommittedEnv]:
     """A client where every request gets its own database session.
 
     The `client` fixture hands every request the *same* `db_session`. That is a
@@ -226,13 +283,19 @@ async def committed_env(tmp_path) -> AsyncIterator[CommittedEnv]:
     app = create_app()
     app.dependency_overrides[get_db] = _override_get_db
 
-    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    transport = ASGITransport(
+        app=app, raise_app_exceptions=False, client=(address, 51234)
+    )
+    held: CommittedEnv | None = None
     try:
         async with AsyncClient(
             transport=transport, base_url="http://testserver"
         ) as http_client:
-            yield CommittedEnv(http_client, factory)
+            held = CommittedEnv(http_client, factory, _app=app)
+            yield held
     finally:
+        if held is not None:
+            await held.aclose()
         app.dependency_overrides.clear()
         if teardown_schema is not None:
             async with engine.begin() as connection:
@@ -285,7 +348,9 @@ async def client(db_session) -> AsyncIterator[AsyncClient]:
     app = create_app()
     app.dependency_overrides[get_db] = _override_get_db
 
-    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    transport = ASGITransport(
+        app=app, raise_app_exceptions=False, client=(unique_client_address(), 51234)
+    )
     async with AsyncClient(
         transport=transport, base_url="http://testserver"
     ) as http_client:

@@ -456,6 +456,26 @@ be a CHECK constraint, which may only reference its own row. It is enforced in
 the session service, and `Session.is_rated(db)` is the check it is written
 against.
 
+**Rate_Limit_Counters**
+
+- `id` (PK), `public_id` (unique)
+- `scope` — what is being counted: `auth.login.account`, `auth.login.ip`,
+  `auth.register.ip`
+- `key` — the thing counted within the scope: a normalised email address, or a
+  client IP
+- `attempts` — CHECK: `attempts >= 0`, `server_default` `0`
+- `locked_until` — nullable; null means not locked
+- Unique on (`scope`, `key`)
+
+`scope` is part of the identity of the row rather than a label, so two scopes
+cannot share a counter when their keys coincide — a student's email address is not
+an IP address, but `"127.0.0.1"` is a legal local part and the two must not
+collide. The unique constraint is load-bearing rather than decorative: it is the
+`ON CONFLICT` target that makes the limiter's increment atomic. See 9.3.
+
+`public_id` is unused — no endpoint returns this table — and is declared anyway
+because every table in this codebase carries one.
+
 ---
 
 ## 6. Multi-Tiered Tutor Validation Protocol
@@ -730,15 +750,14 @@ addresses, or a stolen copy of the database. Every choice below is aimed at one 
 those two, and the reasoning is recorded so a later change can be judged against
 it rather than re-argued from scratch.
 
-> **Status: the primitives are built; the endpoints that enforce them are not.**
-> Everything in 9.1–9.3 and 9.5 is implemented and unit-tested in
-> `app/core/security.py`, `app/core/password_policy.py` and
-> `app/core/config.py`. `app/api/v1/auth.py`, `app/services/auth_service.py` and
-> `app/api/deps.py` are still empty, so **none of it is on a request path yet.**
-> `denial_reason`, `hash_password`, `verify_password`, `create_token_pair` and
-> `decode_token` currently have no production caller. Read this section as the
-> contract those endpoints must satisfy, not as a description of live
-> enforcement. Until they exist, there is no sign-in and no stored credential.
+> **Status: enforced on the request path.** Everything in 9.1, 9.2, 9.4 and 9.5
+> is implemented and unit-tested in `app/core/security.py`,
+> `app/core/password_policy.py` and `app/core/config.py`; the limiter in 9.3 lives
+> in `app/services/rate_limit.py`. All of it is reached through
+> `app/services/auth_service.py`, which every auth route calls.
+> `denial_reason`, the password hashers, `create_token_pair` and `decode_token`
+> all have production callers, and `app/api/deps.py` guards the authenticated
+> routes through the `CurrentUser` and `DatabaseSession` aliases.
 
 ### 9.1 Secrets
 
@@ -787,7 +806,89 @@ called yet:
   fail *before* any Argon2 work happens and would otherwise return measurably
   faster than a wrong password.
 
-### 9.3 Password acceptance
+### 9.3 Rate limiting
+
+Sign-in, sign-up and the PIN handshake are all bounded. Argon2id makes each guess
+expensive, which sets the *cost* of an attempt; these counters set how many
+attempts are allowed, which is the half that cost does not provide.
+
+**The counters are rows in `rate_limit_counters`, not entries in a dictionary.**
+An in-process counter is per worker process, so with four workers an attacker gets
+four times the configured budget for free, and a restart wipes the history —
+weakest exactly when the service is busiest and most worth attacking. The PIN
+throttle on the session row is the same decision at a smaller scale.
+
+**One row per (scope, key), and the increment is a single statement.**
+`INSERT ... ON CONFLICT (scope, key) DO UPDATE SET attempts = attempts + 1
+RETURNING attempts, locked_until`. Written the obvious way — read the row, add
+one in Python, write it back — the counter loses updates under concurrency: twenty
+simultaneous failures all read zero and all write one, so the ceiling is never
+reached and batching defeats the limit entirely. The `+ 1` on the right of `SET`
+refers to the *stored* value, which is what makes each attempt one atomic step.
+This is asserted against twenty real concurrent requests in
+`tests/test_rate_limit.py`, and that test fails if the statement is rewritten as
+a read-modify-write.
+
+The lock is armed by the same statement that increments, so it cannot be skipped
+by arriving all at once.
+
+**Two scopes for sign-in, because each bounds a different attack.**
+
+| Scope | Key | Bounds |
+| ----- | --- | ------ |
+| `auth.login.account` | Normalised email | Guessing one known account. |
+| `auth.login.ip` | Client address | Spraying one address across many accounts. |
+
+Neither alone is sufficient. A per-account limit does nothing against spraying,
+because every target account starts at zero failures; a per-address limit alone
+lets an attacker spread their guesses across addresses and keep going. Sign-up
+has only the address scope, since before an account exists there is no account to
+key on.
+
+**A success clears the account counter and not the address counter.** That
+asymmetry is deliberate. Forgetting a student's five typos is basic manners. But
+refilling the address budget on every successful sign-in would hand anyone
+holding one valid account an unlimited number of guesses — sign in, get twenty
+more, repeat.
+
+**Both locks are checked before any Argon2 work.** A throttled caller should not
+be able to spend server CPU by continuing to try.
+
+**The client address is `request.client` unless a proxy is declared.**
+`X-Forwarded-For` is ignored entirely when `trusted_proxy_hops` is 0, because a
+header the caller sets is a rate-limit identity the caller chooses, which would
+make the ceiling decorative. When proxies *are* declared, the entry counted is the
+one that many hops **from the right**: the leftmost entry is written by nobody the
+deployment controls, so an attacker prepends a forged address there and has it
+believed. Too few hops and every request shares the proxy's address, so one
+student's five wrong passwords lock out a campus; too many and forged entries are
+trusted. Count them exactly, and fall back to the socket address when the chain is
+shorter than declared, rather than guessing which entry to believe.
+
+**Known costs of this design, stated rather than discovered later.**
+
+- A *locked account* returns 429 while an unknown address returns 401, which is a
+  weak enumeration signal — it only appears after the attacker has already spent
+  five wrong guesses on that address, so it confirms a guess rather than
+  answering an unasked question. Closing it entirely would require locking on
+  something an attacker cannot vary per guess, which is not available here.
+- Conversely, once an *address* is throttled, every account looks identical from
+  it: unknown and known addresses get the same 429 body. Were it otherwise the
+  address ceiling would become an enumeration oracle and hand out which student
+  addresses have accounts — undoing the decoy burn in 9.2.
+- Account lockout is a denial of service against any address the attacker knows.
+  That is the accepted trade for making offline guessing of a *known* account
+  pointless, and the cooldown bounds it. Address lockout has the mirror risk on a
+  shared NAT, which is why that counter is per address and never global.
+- `429` rather than `403` throughout, so a client can tell "wrong account" from
+  "right account, too soon" and wait instead of logging the student out. The wait
+  is published in both the `Retry-After` header and `errors.retry_after_seconds`.
+
+All seven thresholds live in `app/core/config.py` and are tunable per
+deployment without a code change. The service-level reasoning, including why the
+per-IP scope is not reset on success, is in `app/services/rate_limit.py`.
+
+### 9.4 Password acceptance
 
 Length-based, **8 to 128** code points, with no composition rules. Character-class
 requirements are well documented to produce `Passw0rd!` — a predictable
@@ -805,13 +906,12 @@ brute-forces a twelve character space when the useful guesses are eight characte
 and known. The deny-list, not the floor, is what rejects attacker guesses, and
 Argon2id's 19 MiB cost is what makes each one expensive.
 
-**The residual risk is that there is no rate limiting on sign-in** (see 9.8), so
-the number of guesses is unbounded and the deny-list is the only thing between a
-leaked student address and a guessed password. This is a pre-existing gap that a
-short floor makes load-bearing rather than theoretical. Rate limiting on
-`/v1/auth/login` and `/v1/auth/register` is the correct next control, and it is
-preferable to raising the floor back, because it addresses the actual threat
-without the cost to the student.
+**Rate limiting on sign-in and sign-up is now in place** (see 9.3), which closes
+the gap this paragraph used to name. The eight-character floor is now backed by a
+bound on the number of guesses as well as the deny-list, so a leaked student
+address is no longer enough on its own. Note the deliberate consequence: the
+limiter was added rather than the floor being raised back, because it addresses
+the actual threat without the cost to the student.
 
 A small static deny-list covers the passwords that would otherwise make the
 Argon2 cost affordable. It is checked at **registration and password change only,
@@ -837,7 +937,7 @@ covers the trailing digits of its own longer variants. The list still has holes 
 found by trying one, not by a control failing. That is the argument for rate
 limiting.
 
-### 9.4 Tokens
+### 9.5 Tokens
 
 - **Access** — JWT, HS256. Carries `sub` (the `public_id`), `type`, `iat`, `exp`
   and `jti`. Nothing else. Roles are **not** in the token; they are read per
@@ -891,7 +991,7 @@ retry**; it does not report them as signed out, because "we could not reach the
 network" and "your session ended" are different facts and only one of them is
 true. A refresh that is *refused* does clear the token and routes to sign-in.
 
-### 9.5 Logging
+### 9.6 Logging
 
 - `database_echo` logs SQL **with its bound parameters**, which for this schema
   means email addresses and password hashes. It is refused at startup unless
@@ -903,7 +1003,7 @@ true. A refresh that is *refused* does clear the token and routes to sign-in.
   Interpolating an unexpected exception's message is how connection strings and
   row contents end up in a student's error toast.
 
-### 9.6 Data protection
+### 9.7 Data protection
 
 - Compliant with the Uganda Data Protection and Privacy Act, 2019 (DPPA). Grades
   and transcripts require explicit consent and secure storage.
@@ -913,7 +1013,7 @@ true. A refresh that is *refused* does clear the token and routes to sign-in.
 - The client never sees a row's primary key.
 - **Transcript storage**: Uploaded verification proofs (Tier 1) are stored securely on the local filesystem of the backend. Only authorized admins and the system can access the raw paths stored in the database.
 
-### 9.7 Schema changes
+### 9.8 Schema changes
 
 Alembic, with a naming convention applied to every constraint. Names matter here
 because a constraint whose name is generated afresh looks like a drop plus an add
@@ -924,7 +1024,7 @@ of the rebuild.
 from it — reformatting generated files produces churn that hides the real changes
 on the next autogenerate run.
 
-### 9.8 Not yet in place
+### 9.9 Not yet in place
 
 Stated explicitly so nothing here is mistaken for a control that exists:
 
@@ -934,8 +1034,6 @@ Stated explicitly so nothing here is mistaken for a control that exists:
   that lock a pilot out of its own API.
 - **CORS defaults to empty**, which is correct for a mobile client and means
   browser origins are untrusted until deliberately configured.
-- **No rate limiting** on sign-in. The decoy verification makes enumeration
-  expensive per guess but does not bound the number of guesses.
 - **No structured audit log** of access to academic records. Required before any
   institutional pilot.
 
