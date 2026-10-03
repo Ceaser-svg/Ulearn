@@ -65,7 +65,7 @@ flutter:
   assets:
     - assets/images/
     - assets/icons/
-    - assets/lotties/PeerPass.json
+    - assets/lotties/
 
 flutter_native_splash:
   color: "#FFFFFF"

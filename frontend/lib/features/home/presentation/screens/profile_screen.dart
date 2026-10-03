@@ -4,6 +4,7 @@ import 'package:peerpass/core/constants/app_dimens.dart';
 import 'package:peerpass/core/models/user_profile.dart';
 import 'package:peerpass/core/models/user_role.dart';
 import 'package:peerpass/core/state/session.dart';
+import 'package:peerpass/features/home/presentation/providers/profile_providers.dart';
 import 'package:peerpass/features/home/presentation/providers/sign_out_controller.dart';
 import 'package:peerpass/features/home/presentation/widgets/delete_account_tile.dart';
 
@@ -14,6 +15,9 @@ class ProfileScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final profile = ref.watch(sessionControllerProvider).profile;
     final theme = Theme.of(context);
+    final university = profile?.universityId == null
+        ? null
+        : ref.watch(universityByIdProvider(profile!.universityId!));
 
     return Scaffold(
       appBar: AppBar(title: const Text('Profile')),
@@ -43,7 +47,13 @@ class ProfileScreen extends ConsumerWidget {
                   ListTile(
                     leading: const Icon(Icons.school_outlined),
                     title: const Text('University'),
-                    subtitle: Text(profile?.universityId ?? 'Not provided'),
+                    subtitle: university == null
+                        ? const Text('Not provided')
+                        : university.when(
+                            data: (value) => Text(value ?? 'Unavailable'),
+                            loading: () => const Text('Loading...'),
+                            error: (_, _) => const Text('Unavailable'),
+                          ),
                   ),
                   ListTile(
                     leading: const Icon(Icons.badge_outlined),

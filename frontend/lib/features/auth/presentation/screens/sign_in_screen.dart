@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:lottie/lottie.dart';
 import 'package:peerpass/app/router.dart';
 import 'package:peerpass/core/constants/app_dimens.dart';
 import 'package:peerpass/core/error/failures.dart';
@@ -9,7 +10,6 @@ import 'package:peerpass/core/widgets/failure_view.dart';
 import 'package:peerpass/features/auth/presentation/providers/auth_providers.dart';
 import 'package:peerpass/features/auth/presentation/widgets/credential_fields.dart';
 import 'package:peerpass/features/auth/presentation/widgets/field_errors.dart';
-import 'package:peerpass/features/auth/presentation/widgets/sign_in_lock.dart';
 
 /// Where an existing student signs back in.
 ///
@@ -84,7 +84,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const Center(child: SignInLock()),
+                      const _AuthAnimation(asset: 'assets/lotties/Login.json'),
                       const SizedBox(height: AppDimens.xl),
                       Text(
                         'Welcome back',
@@ -127,7 +127,9 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                             ? const SizedBox(
                                 height: 20,
                                 width: 20,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               )
                             : const Text('Sign in'),
                       ),
@@ -143,6 +145,36 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                 ),
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AuthAnimation extends StatelessWidget {
+  const _AuthAnimation({required this.asset});
+
+  final String asset;
+
+  @override
+  Widget build(BuildContext context) {
+    final reducedMotion =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(
+          maxWidth: AppDimens.signInAnimationMax,
+          maxHeight: AppDimens.signInAnimationMax,
+        ),
+        child: AspectRatio(
+          aspectRatio: 1,
+          child: Lottie.asset(
+            asset,
+            animate: !reducedMotion,
+            repeat: false,
+            fit: BoxFit.contain,
           ),
         ),
       ),
