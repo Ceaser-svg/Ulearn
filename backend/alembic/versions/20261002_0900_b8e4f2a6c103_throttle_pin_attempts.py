@@ -45,8 +45,13 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # `op.f`, not a bare literal. A literal is treated as a *bare* suffix and run
+    # through the naming convention, so passing the already-expanded name here
+    # produced `DROP CONSTRAINT ck_sessions_ck_sessions_pin_failed_attempts_not_negative`
+    # and the downgrade failed. `op.f` marks a name as already resolved, which is
+    # why every other migration in this directory spells it that way.
     op.drop_constraint(
-        "ck_sessions_pin_failed_attempts_not_negative", "sessions", type_="check"
+        op.f("ck_sessions_pin_failed_attempts_not_negative"), "sessions", type_="check"
     )
     op.drop_column("sessions", "pin_locked_until")
     op.drop_column("sessions", "pin_failed_attempts")
