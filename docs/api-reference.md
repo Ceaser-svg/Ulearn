@@ -210,10 +210,24 @@ answer 401 for an unknown address and 429 for a locked one, the ceiling would
 hand out the list of which addresses hold accounts — undoing the decoy burn
 above.
 
-Sign-up is throttled per address too, at 50 accepted registrations per hour. Each
-accepted sign-up costs a full Argon2 hash, so that count is a CPU ceiling as much
-as a request ceiling. Sign-up counts **accepted** registrations; a rejected one
-(a duplicate conflict, or a weak password) costs nothing.
+Sign-up is throttled per address too, at 50 accepted registrations per hour by
+default. Each registration that reaches the password hash costs a full Argon2
+operation, so that budget bounds CPU rather than merely counting requests.
+
+**Both outcomes are charged.** A registration that succeeds *and* one refused as
+a duplicate both draw on the same budget, because both have already paid for the
+hash by the time the answer is sent. Charging only the successes — which is what
+this did at first — leaves the endpoint with an unbounded hashing budget for
+anyone sending addresses that already exist, and such a request returns 409, which
+identifies real student accounts *and* buys unlimited CPU while never being
+counted. The duplicate is still answered with
+`An account already exists for that email address.` until the budget is spent;
+throttling never replaces that message with an error the student cannot act on.
+
+A rejection that happens *before* the hash is not charged, because it costs
+nothing: a password on the deny-list, a password too short or too long for the
+schema, or a caller already throttled. So a student who fumbles the policy a few
+times is not charged for it.
 
 All seven settings are configurable, and the defaults are in
 `backend/app/core/config.py`. See `docs/architecture.md` for how the client

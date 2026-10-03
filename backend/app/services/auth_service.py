@@ -25,7 +25,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.exceptions import (
     AuthenticationProblem,
     ConflictProblem,
@@ -290,6 +290,8 @@ async def register(
     password_hash = await hash_password_async(request.password)
 
     if await load_user_by_email(db, email) is not None:
+        await _charge_registration(db, client_address, settings)
+        await db.commit()
         raise ConflictProblem("An account already exists for that email address.")
 
     user = User(email=email, full_name=None, password_hash=password_hash)
@@ -302,6 +304,8 @@ async def register(
         await db.flush()
     except IntegrityError as exc:
         await db.rollback()
+        await _charge_registration(db, client_address, settings)
+        await db.commit()
         raise ConflictProblem(
             "An account already exists for that email address."
         ) from exc
@@ -311,20 +315,37 @@ async def register(
     # is what the provisional-to-verified path is for.
     await set_roles(db, user.id, {UserRole.STUDENT})
 
-    # Charged on success, so the ceiling is on accounts *created* from one
-    # address rather than on sign-up attempts. A typo'd address does not consume
-    # a student's budget, and neither does an attacker who replays one.
-    await rate_limit.record_failure(
+    await _charge_registration(db, client_address, settings)
+
+    response = await _issue_tokens(db, user)
+    await db.commit()
+    return response
+
+
+async def _charge_registration(
+    db: AsyncSession, client_address: str, settings: Settings
+) -> None:
+    """Charge one registration attempt against the per-address budget.
+
+    Charged whether the account was created or refused as a duplicate, because
+    both have already cost a full Argon2 hash by the time this is reached, and
+    bounding that cost is the entire point of the counter. Charging only
+    successes — which is what this did at first — leaves the endpoint with an
+    unbounded hashing budget for anyone willing to send addresses that already
+    exist, which is precisely what an attacker probing for student accounts
+    does: every probe returns 409, so it identifies real accounts *and* buys
+    unlimited CPU, while never being charged for it.
+
+    A rejection that happens before the hash is not charged, because it costs
+    nothing: a weak password, or a caller already throttled.
+    """
+    await rate_limit.record_attempt(
         db,
         rate_limit.SCOPE_REGISTER_IP,
         client_address,
         max_attempts=settings.auth_register_ip_max_attempts,
         lockout=timedelta(seconds=settings.auth_register_ip_lockout_seconds),
     )
-
-    response = await _issue_tokens(db, user)
-    await db.commit()
-    return response
 
 
 # --- sign-in ---------------------------------------------------------------
@@ -429,14 +450,14 @@ async def _count_failure(db: AsyncSession, client_address: str, email: str) -> N
     count.
     """
     settings = get_settings()
-    await rate_limit.record_failure(
+    await rate_limit.record_attempt(
         db,
         rate_limit.SCOPE_LOGIN_ACCOUNT,
         email,
         max_attempts=settings.auth_login_max_attempts,
         lockout=timedelta(seconds=settings.auth_login_lockout_seconds),
     )
-    await rate_limit.record_failure(
+    await rate_limit.record_attempt(
         db,
         rate_limit.SCOPE_LOGIN_IP,
         client_address,

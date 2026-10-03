@@ -845,6 +845,16 @@ lets an attacker spread their guesses across addresses and keep going. Sign-up
 has only the address scope, since before an account exists there is no account to
 key on.
 
+**The registration scope charges every attempt that reaches the password hash,
+not only the successful ones.** Both outcomes have already paid for an Argon2
+operation by the time the answer goes out, so both draw on the same budget.
+Charging only successes leaves an unbounded hashing budget for anyone willing to
+send addresses that already exist — and that request returns 409, which both
+identifies real student accounts and buys unlimited CPU while never being
+counted. It is a strictly better enumeration oracle than sign-in, where a wrong
+password costs the same hash and *is* counted. Rejections that happen before the
+hash, such as a deny-listed password, are not charged: they cost nothing.
+
 **A success clears the account counter and not the address counter.** That
 asymmetry is deliberate. Forgetting a student's five typos is basic manners. But
 refilling the address budget on every successful sign-in would hand anyone

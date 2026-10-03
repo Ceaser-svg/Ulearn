@@ -24,7 +24,9 @@ from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.models.rate_limit import RateLimitCounter
-from app.services import rate_limit
+from app.schemas.user import RegisterRequest
+from app.services import auth_service, rate_limit
+from app.services.auth_service import ConflictProblem
 
 LOGIN_URL = "/v1/auth/login"
 REGISTER_URL = "/v1/auth/register"
@@ -400,6 +402,167 @@ async def test_a_throttled_address_cannot_register_but_another_can(
             committed_env, _email("other.network"), client=elsewhere
         )
         assert response.status_code == 201, response.text
+    finally:
+        get_settings.cache_clear()
+
+
+# --- probes for addresses that already have accounts -----------------------
+
+
+async def test_probing_existing_accounts_is_throttled_like_real_signups(
+    committed_env, monkeypatch
+) -> None:
+    """The duplicate path costs a full Argon2 hash, so it is charged for one.
+
+    This is the enumeration oracle. Every probe below returns 409, which tells
+    the caller the address has an account, and each one paid for a hash on the
+    way. Charging only successful sign-ups — the first version of this — left
+    the endpoint with an unlimited hashing budget for anyone willing to send
+    addresses that already exist, and a strictly better oracle than sign-in,
+    where a wrong password costs the same hash and *is* counted.
+    """
+    monkeypatch.setenv("AUTH_REGISTER_IP_MAX_ATTEMPTS", "4")
+    get_settings.cache_clear()
+    try:
+        victim = _email("already.enrolled")
+        assert (await _register(committed_env, victim)).status_code == 201
+
+        statuses = []
+        for _ in range(6):
+            response = await _register(committed_env, victim)
+            statuses.append(response.status_code)
+            if response.status_code == 429:
+                break
+
+        # The first probe is still answered in full: the budget was spent by the
+        # sign-up itself plus the probes after it, not by the first probe.
+        assert statuses[0] == 409, statuses
+        assert 429 in statuses, statuses
+    finally:
+        get_settings.cache_clear()
+
+
+async def test_a_student_who_retries_their_own_address_is_still_told_to_sign_in(
+    committed_env, monkeypatch
+) -> None:
+    """Throttling must not swallow the message the student needs.
+
+    The budget is small here on purpose. A duplicate still answers 409 with the
+    plain-language reason until the budget is spent; it does not start returning
+    429 the moment an address exists, which would be useless to the honest
+    student it is aimed at.
+    """
+    monkeypatch.setenv("AUTH_REGISTER_IP_MAX_ATTEMPTS", "5")
+    get_settings.cache_clear()
+    try:
+        email = _email("forgetful.registrant")
+        assert (await _register(committed_env, email)).status_code == 201
+
+        response = await _register(committed_env, email)
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"] == (
+            "An account already exists for that email address."
+        )
+    finally:
+        get_settings.cache_clear()
+
+
+async def test_a_rejected_password_is_not_charged(committed_env, monkeypatch) -> None:
+    """A refusal that happens before the hash costs nothing, so it is not charged.
+
+    Otherwise a student who fumbled a password policy would spend their sign-up
+    budget on typos, having consumed no server CPU at all.
+
+    The ceiling is set below the number of rejections on purpose. At the default
+    these rejections could all be charged without exhausting anything, and the
+    final sign-up would succeed either way — a test that passes whether or not
+    the behaviour exists.
+    """
+    monkeypatch.setenv("AUTH_REGISTER_IP_MAX_ATTEMPTS", "5")
+    get_settings.cache_clear()
+    try:
+        email = _email("weak.password")
+        for _ in range(9):
+            # Schema-valid but on the deny-list. A five-character password would
+            # be rejected by the request schema before the service is reached,
+            # which is a different rejection that never reaches the hash either.
+            response = await _register(committed_env, email, password="Password1!")
+            assert response.status_code == 422, response.text
+
+        # The budget is untouched, so a real sign-up still works.
+        assert (
+            await _register(committed_env, email, password=PASSWORD)
+        ).status_code == 201
+    finally:
+        get_settings.cache_clear()
+
+
+async def test_the_lost_race_for_an_address_is_still_charged(
+    committed_env, client_address, monkeypatch
+) -> None:
+    """The branch that two simultaneous sign-ups take is charged too.
+
+    Two requests for one new address can both pass the duplicate pre-check, and
+    the unique index then refuses one of them. That refusal has to be charged on
+    the same terms as the pre-check refusal, or the winner's budget is a budget
+    of one per pair.
+
+    Reaching it needs a real interleaving, which a test cannot schedule. So the
+    pre-check is stubbed out instead: it reports that the address is free while
+    the account is already in the database, which is precisely the state the
+    loser of a race observes. Stubbing the lookup is what makes this deterministic
+    -- and stubbing it is safe here because it makes the *duplicate* case more
+    likely, never less.
+    """
+    email = _email("lost-race")
+    assert (await _register(committed_env, email, password=PASSWORD)).status_code == 201
+
+    async def _pretend_the_address_is_free(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(
+        auth_service, "load_user_by_email", _pretend_the_address_is_free
+    )
+
+    request = RegisterRequest(email=email, password=PASSWORD)
+    async with committed_env.session() as session:
+        with pytest.raises(ConflictProblem):
+            await auth_service.register(session, request, client_address=client_address)
+
+    counter = await _counter(
+        committed_env, rate_limit.SCOPE_REGISTER_IP, client_address
+    )
+    assert counter is not None, (
+        "the refusal down the IntegrityError branch cost nothing"
+    )
+    assert counter.attempts == 2, counter.attempts
+
+
+async def test_probing_costs_a_hash_and_is_bounded_by_the_same_budget(
+    committed_env, monkeypatch
+) -> None:
+    """Successes and duplicates draw on one budget, not two.
+
+    An attacker alternates: create an account, then probe it, then create
+    another. If only successes were counted they would get half the ceiling back
+    per round.
+    """
+    monkeypatch.setenv("AUTH_REGISTER_IP_MAX_ATTEMPTS", "6")
+    get_settings.cache_clear()
+    try:
+        statuses = []
+        for index in range(8):
+            statuses.append(
+                (await _register(committed_env, _email(f"round{index}"))).status_code
+            )
+            statuses.append(
+                (await _register(committed_env, _email(f"round{index}"))).status_code
+            )
+            if 429 in statuses:
+                break
+
+        assert statuses.count(201) + statuses.count(409) <= 6, statuses
+        assert statuses[-1] == 429, statuses
     finally:
         get_settings.cache_clear()
 

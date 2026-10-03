@@ -186,7 +186,7 @@ async def _clear_expired_lock(db: AsyncSession, scope: str, key: str) -> None:
     )
 
 
-async def record_failure(
+async def record_attempt(
     db: AsyncSession,
     scope: str,
     key: str,
@@ -194,7 +194,16 @@ async def record_failure(
     max_attempts: int,
     lockout: timedelta,
 ) -> AttemptOutcome:
-    """Count one failure, and lock the caller out once they are out of tries.
+    """Charge one attempt against a scope's budget, and lock once it is spent.
+
+    Not every scope charges every attempt. The two sign-in scopes charge only
+    failures, because a successful sign-in is not something to ration. The
+    registration scope charges *every attempt that reaches the password hash*,
+    successful or not, because that hash is the cost being bounded: a duplicate
+    probe costs exactly as much CPU as a real sign-up and would otherwise be a
+    way to buy unbounded hashing. What it does not charge is a rejection that
+    happens before the hash — a weak password, or a caller already throttled —
+    because those cost nothing.
 
     The caller must commit before raising. `get_db` rolls back on the error
     path, so an uncommitted counter here would be discarded precisely on the
