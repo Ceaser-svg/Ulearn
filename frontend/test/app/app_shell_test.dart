@@ -96,7 +96,7 @@ FakeAuthRepository _signedIn({UserProfile? profile}) {
 
 Future<void> _settle(WidgetTester tester) async {
   await tester.pump();
-  await tester.pumpAndSettle();
+  await tester.pump(const Duration(seconds: 1));
 }
 
 void main() {

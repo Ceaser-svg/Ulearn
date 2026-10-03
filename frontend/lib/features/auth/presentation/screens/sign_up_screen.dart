@@ -192,7 +192,7 @@ class _AuthAnimation extends StatelessWidget {
           child: Lottie.asset(
             asset,
             animate: !reducedMotion,
-            repeat: false,
+            repeat: true,
             fit: BoxFit.contain,
           ),
         ),

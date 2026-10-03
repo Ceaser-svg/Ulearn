@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lottie/lottie.dart';
 import 'package:peerpass/core/error/failures.dart';
 import 'package:peerpass/core/models/user_profile.dart';
 import 'package:peerpass/core/models/user_role.dart';
@@ -139,8 +140,10 @@ bool _passwordIsObscured(WidgetTester tester) =>
 /// the auth guard the screen is not responsible for.
 Future<ProviderContainer> _pumpSignIn(
   WidgetTester tester,
-  AuthRepository repository,
-) async {
+  AuthRepository repository, {
+  bool disableAnimations = true,
+  bool settle = true,
+}) async {
   final container = ProviderContainer(
     overrides: [authRepositoryProvider.overrideWithValue(repository)],
   );
@@ -149,10 +152,16 @@ Future<ProviderContainer> _pumpSignIn(
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
-      child: MaterialApp(theme: AppTheme.light, home: const SignInScreen()),
+      child: MaterialApp(
+        theme: AppTheme.light,
+        home: MediaQuery(
+          data: MediaQueryData(disableAnimations: disableAnimations),
+          child: const SignInScreen(),
+        ),
+      ),
     ),
   );
-  await _settle(tester);
+  if (settle) await _settle(tester);
   return container;
 }
 
@@ -164,6 +173,29 @@ Future<void> _enterValidCredentials(WidgetTester tester) async {
 }
 
 void main() {
+  testWidgets('renders the supplied looping login animation', (tester) async {
+    await _pumpSignIn(
+      tester,
+      _CountingAuthRepository(),
+      disableAnimations: false,
+      settle: false,
+    );
+    await tester.pump();
+
+    final animation = tester.widget<Lottie>(find.byType(Lottie));
+    expect(animation.repeat, isTrue);
+    expect(animation.animate, isTrue);
+  });
+
+  testWidgets('disables login animation when reduced motion is enabled', (
+    tester,
+  ) async {
+    await _pumpSignIn(tester, _CountingAuthRepository());
+
+    final animation = tester.widget<Lottie>(find.byType(Lottie));
+    expect(animation.animate, isFalse);
+  });
+
   testWidgets('an empty form is refused without calling the repository', (
     tester,
   ) async {

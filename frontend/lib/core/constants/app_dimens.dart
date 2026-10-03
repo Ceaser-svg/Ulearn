@@ -51,9 +51,9 @@ abstract final class AppDimens {
   static const double splashAnimationFraction = 0.55;
 
   /// Maximum width of the sign-in animation.
-  static const double signInAnimationMax = 160;
+  static const double signInAnimationMax = 175;
 
   /// Maximum bounds of the sign-up animation.
-  static const double signUpAnimationMaxWidth = 180;
-  static const double signUpAnimationMaxHeight = 145;
+  static const double signUpAnimationMaxWidth = 195;
+  static const double signUpAnimationMaxHeight = 155;
 }
