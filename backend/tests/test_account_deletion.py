@@ -42,6 +42,7 @@ from app.services.deletion_service import (
     delete_account,
     tombstone_email,
 )
+from tests.support import sole_faculty_id
 
 GOOD_PASSWORD = "correct horse battery staple"
 
@@ -118,6 +119,9 @@ async def _verified_tutor(db_session, university, unit, grade, email: str) -> Us
         full_name="Grace Hopper",
         password_hash="x",
         university_id=university.id,
+        # Placed in the faculty of the unit they are verified against, because a
+        # tutor with no faculty can no longer appear on any rail.
+        faculty_id=unit.subject_id,
         academic_data_consented_at=datetime.now(UTC),
     )
     db_session.add(user)
@@ -190,6 +194,7 @@ class TestIdentityIsScrubbed:
         university, _unit, _grade = await _institution(db_session)
         _body, user = await _account(client, db_session, "ada@student.makerere.ac.ug")
         user.university_id = university.id
+        user.faculty_id = await sole_faculty_id(db_session, university)
         user.year_of_study = 3
         user.academic_data_consented_at = datetime.now(UTC)
         await db_session.commit()
@@ -690,6 +695,7 @@ class TestTombstonesAreNotProposedAsTutors:
         )
         assert student_row is not None
         student_row.university_id = university.id
+        student_row.faculty_id = await sole_faculty_id(db_session, university)
         unit_public_id = str(unit.public_id)
         tutor_public_id = str(tutor.public_id)
         await db_session.commit()
@@ -732,6 +738,7 @@ class TestTombstonesAreNotProposedAsTutors:
         )
         assert student_row is not None
         student_row.university_id = university.id
+        student_row.faculty_id = await sole_faculty_id(db_session, university)
         tutor_public_id = str(tutor.public_id)
         await db_session.commit()
 

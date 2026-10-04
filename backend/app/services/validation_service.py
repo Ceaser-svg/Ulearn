@@ -14,6 +14,7 @@ from app.models.enums import CompetencyStatus
 from app.models.grading_scale import Grade
 from app.models.user import User
 from app.schemas.competency import CompetencyCreate, CompetencyResponse
+from app.services import faculty_scope
 
 #: Everything `_competency_response` reads, in one place.
 #:
@@ -89,11 +90,12 @@ async def create_competency(
         )
 
     course_unit = await _load_course_unit(db, payload.course_unit_id)
-    if course_unit.university_id != user.university_id:
-        raise ValidationProblem(
-            "That course unit does not belong to the student's university.",
-            errors={"course_unit_id": "must match the student's university"},
-        )
+    faculty_scope.require_own_university(course_unit, user)
+    # The other half of the verification gate. A tutor is verified for the units
+    # they teach, and they teach their own faculty's; without this a Computing
+    # student could be verified against a Medicine unit and then appear in a rail
+    # that is scoped away from every Medicine student.
+    faculty_scope.require_own_faculty(course_unit, user)
 
     grade = await _load_grade(db, payload.grade_id)
     if course_unit.university.grading_scale_id is None:

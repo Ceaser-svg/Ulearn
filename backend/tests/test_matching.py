@@ -35,6 +35,7 @@ from app.models.user import User, set_roles
 from app.schemas.matching import MATCH_EXCLUSION_REASONS, MatchRequest
 from app.schemas.session import HelpRequestCreate
 from app.services import matching_service
+from tests.support import sole_faculty_id
 
 GOOD_PASSWORD = "correct horse battery staple"
 
@@ -65,12 +66,14 @@ async def _seed_match_data(db_session):
         password_hash="hashed-password",
         full_name="Student Example",
         university=university,
+        faculty=subject,
     )
     tutor = User(
         email="tutor@mak.ac.ug",
         password_hash="hashed-password",
         full_name="Tutor Example",
         university=university,
+        faculty=subject,
     )
     tutor_profile = TutorProfile(
         user=tutor,
@@ -157,12 +160,14 @@ async def test_tutor_from_other_university_is_excluded(db_session):
         password_hash="hashed-password",
         full_name="Student Example",
         university=home_university,
+        faculty=subject,
     )
     tutor = User(
         email="tutor@other.ac.ug",
         password_hash="hashed-password",
         full_name="Other Tutor",
         university=other_university,
+        faculty=subject,
     )
     db_session.add_all(
         [
@@ -275,6 +280,7 @@ async def _student(
         password_hash="hashed-password",
         full_name=full_name,
         university=university,
+        faculty_id=await sole_faculty_id(db_session, university),
     )
     db_session.add(user)
     await db_session.flush()
@@ -301,11 +307,20 @@ async def _competent_tutor(
     explicitly, because the search joins `user_roles`: a user with a verified
     grade and no role is not a tutor at all and is never even considered.
     """
+    # A tutor is placed in the faculty of the units they teach, rather than looked
+    # up: it is the same answer by construction, and it cannot drift from the units
+    # a test is about to match on. Asserted rather than assumed, because a fixture
+    # handed units from two faculties has no single correct faculty to pick.
+    subjects = {unit.subject_id for unit in units}
+    assert len(subjects) == 1, (
+        "a tutor belongs to one faculty, so the units handed here must share one"
+    )
     user = User(
         email=email,
         password_hash="hashed-password",
         full_name=full_name,
         university=university,
+        faculty_id=subjects.pop(),
     )
     db_session.add(user)
     if profile:
@@ -795,6 +810,7 @@ async def _account(
         user.full_name = full_name
     if university is not None:
         user.university_id = university.id
+        user.faculty_id = await sole_faculty_id(db_session, university)
     await db_session.commit()
     return body, user
 

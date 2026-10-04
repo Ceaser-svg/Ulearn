@@ -64,6 +64,13 @@ async def list_top_tutors(
     university holds, so the rail is useful on a screen that has no unit picker
     yet rather than empty until one is chosen.
 
+    Either way the rail is the student's own faculty's. A unit in another faculty,
+    and a tutor teaching one, are both outside what the student can ask for help
+    with, so offering them would be offering a conversation with no course in it.
+    This is the discovery boundary and it is enforced here rather than left to the
+    picker: `get_tutor_detail` deliberately stays open so a shared link still works,
+    which is only defensible while the rail stays inside the faculty.
+
     The gate is the same one in both paths, and it reads as if the unfiltered
     path were the looser one. It is not, and cannot be: every course unit at one
     university is graded on that university's single scale, so "at or above
@@ -81,14 +88,19 @@ async def list_top_tutors(
     scope: CourseUnit | None = None
     if course_unit_id is not None:
         scope = await _load_course_unit(db, course_unit_id)
-        if scope is None or scope.university_id != user.university_id:
+        if (
+            scope is None
+            or scope.university_id != user.university_id
+            or user.faculty_id is None
+            or scope.subject_id != user.faculty_id
+        ):
             # An empty rail rather than a 404 or a 422, for the reason
             # `academics.list_course_units` gives: the client filtered on a
-            # value it believed exists -- a unit deleted, or one at another
-            # institution -- and the honest answer to "tutors for this unit" is
-            # none. A refusal would put the discovery screen into an error
-            # state over a stale picker value, which is something the student
-            # did not do and cannot fix from here.
+            # value it believed exists -- a unit deleted, one at another
+            # institution, or one in another faculty -- and the honest answer to
+            # "tutors for this unit" is none. A refusal would put the discovery
+            # screen into an error state over a stale picker value, which is
+            # something the student did not do and cannot fix from here.
             return []
 
     threshold = await _competency_threshold(db, user.university_id)
@@ -253,6 +265,14 @@ async def _ranked_tutors(
             # like, and a rail is a shortlist of other people.
             User.id != user.id,
             User.university_id == user.university_id,
+            # The faculty silo. A tutor from another faculty teaches units the
+            # student cannot ask for help with, so listing them is offering a
+            # conversation that has no course to happen in. Compared as an
+            # equality rather than filtered in the subquery above, because this is
+            # a property of the person rather than of a competency, and an account
+            # with no faculty compares unequal to everything -- which is the
+            # answer we want for a student who has not finished onboarding.
+            User.faculty_id == user.faculty_id,
             TutorProfile.standing != TutorStanding.SUSPENDED,
         )
         .order_by(

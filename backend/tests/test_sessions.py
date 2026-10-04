@@ -54,12 +54,14 @@ async def _seed_session_data(db_session):
         password_hash="hashed-password",
         full_name="Student Example",
         university=university,
+        faculty=subject,
     )
     tutor = User(
         email="tutor@mak.ac.ug",
         password_hash="hashed-password",
         full_name="Tutor Example",
         university=university,
+        faculty=subject,
     )
     tutor_profile = TutorProfile(
         user=tutor,

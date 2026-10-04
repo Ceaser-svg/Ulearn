@@ -43,11 +43,11 @@ async def handshake(committed_env: CommittedEnv) -> dict:
     pre-loaded.
     """
     client = committed_env.client
-    course_unit = await first_course_unit(client)
+    course_unit = await first_course_unit(committed_env)
 
     tutor = await verified_tutor(committed_env, "pin.tutor@peerpass.mak.ac.ug")
     student = await register(client, "pin.student@student.mak.ac.ug")
-    await complete_profile(client, student)
+    await complete_profile(client, student, course_unit=course_unit)
 
     session = await scheduled_session(committed_env, tutor, student, course_unit)
 

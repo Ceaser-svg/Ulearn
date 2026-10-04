@@ -6,10 +6,14 @@ can be deleted by accident, and the wire tests here have enough in common
 (register, complete the wizard, authorise a request) to be worth naming once.
 """
 
+import uuid
 from datetime import UTC, datetime, timedelta
 
 from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.course_unit import CourseUnit, University
 from app.models.enums import UserRole
 from app.models.user import User, set_roles
 from tests.conftest import CommittedEnv
@@ -58,33 +62,112 @@ def select_user_by_email(email: str):
     return select(User).where(User.email == email)
 
 
+async def sole_faculty_id(db: AsyncSession, university: University) -> uuid.UUID:
+    """The one faculty a fixture institution has course units under.
+
+    Most fixtures build a single-subject world, because that is the smallest thing
+    that can exercise one rule. This reads that subject so a staged account can be
+    placed in it, which is no longer optional housekeeping: an account with no
+    faculty can list no course unit, ask for no help, and see no tutor, so a
+    fixture that leaves `faculty_id` null now fails in whichever assertion happens
+    to come first rather than in the fixture.
+
+    Resolved through the units rather than through `Subject.university_id`, because
+    fixtures attach a subject to a university by way of its course units and leave
+    the back-reference null. Asserting a single subject rather than taking the
+    first is deliberate: a fixture that quietly picked one of two faculties would
+    make a test about the silo pass or fail on which row the database returned.
+    """
+    found = set(
+        (
+            await db.execute(
+                select(CourseUnit.subject_id)
+                .where(
+                    CourseUnit.university_id == university.id,
+                    CourseUnit.subject_id.is_not(None),
+                )
+                .distinct()
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(found) == 1, (
+        f"expected {university.name} to have course units under exactly one "
+        f"faculty, found {len(found)}; a fixture with two has to say which one "
+        "the account belongs to"
+    )
+    return found.pop()
+
+
 async def complete_profile(
-    client: AsyncClient, body: dict, *, course_unit_id: str | None = None
+    client: AsyncClient, body: dict, *, course_unit: dict
 ) -> None:
     """The onboarding wizard, in the order a real client performs it.
 
-    A university is required before a help request or a competency, and consent is
-    required before any transcript evidence, so both are set here rather than left
-    to each test to rediscover the dependency.
+    A university is required before a help request or a competency, a faculty is
+    required before any course unit can be listed at all, and consent is required
+    before any transcript evidence, so all three are set here rather than left to
+    each test to rediscover the dependency.
+
+    `course_unit` is required rather than optional because the faculty is taken
+    from it. That is not tidiness: it is what keeps the fixtures self-consistent
+    after the course-unit endpoint became faculty-scoped. An account whose faculty
+    disagreed with the unit it is handed would fail every matching assertion for a
+    reason that has nothing to do with what the test is about, and the optional
+    form made that failure a matter of argument order rather than a type error.
     """
     university_id = (await client.get("/v1/academics/universities")).json()[0]["id"]
+    assert course_unit["subject_id"] is not None, (
+        "the suite needs a unit with a faculty"
+    )
     payload: dict = {
         "full_name": "Loop Tester",
         "university_id": university_id,
+        "faculty_id": course_unit["subject_id"],
         "academic_data_consented": True,
+        "primary_course_unit_ids": [course_unit["id"]],
     }
-    if course_unit_id is not None:
-        payload["primary_course_unit_ids"] = [course_unit_id]
     response = await client.patch("/v1/users/me", headers=bearer(body), json=payload)
     assert response.status_code == 200, response.text
 
 
-async def first_course_unit(client: AsyncClient) -> dict:
-    response = await client.get("/v1/academics/course-units")
-    assert response.status_code == 200, response.text
-    units = response.json()
-    assert units, "the suite needs at least one seeded course unit"
-    return units[0]
+async def first_course_unit(env: CommittedEnv) -> dict:
+    """A seeded course unit, carrying the ids the API would have handed back.
+
+    Read from the database rather than over HTTP, and that is a change of shape
+    with a reason. `/v1/academics/course-units` is scoped to the caller's faculty,
+    so it can only answer for an account that has already chosen one -- which is
+    exactly the state a test needs *before* it can choose. Reading the seed lets
+    this helper and `complete_profile` agree on a faculty without either of them
+    having to be rewritten to discover one, and it is the same row the endpoint
+    would return for that account.
+
+    Ordered by code, so "the first unit" means here what it means over the wire.
+    """
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from app.models.course_unit import CourseUnit
+
+    async with env.session() as session:
+        row = (
+            (
+                await session.execute(
+                    select(CourseUnit)
+                    .options(selectinload(CourseUnit.subject))
+                    .order_by(CourseUnit.university_id, CourseUnit.code)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        assert row is not None, "the suite needs at least one seeded course unit"
+        return {
+            "id": str(row.public_id),
+            "code": row.code,
+            "subject_id": str(row.subject.public_id) if row.subject else None,
+        }
 
 
 async def grade_named(client: AsyncClient, label: str) -> dict:
@@ -106,11 +189,11 @@ async def verified_tutor(env: CommittedEnv, email: str) -> dict:
     does.
     """
     client = env.client
-    course_unit = await first_course_unit(client)
+    course_unit = await first_course_unit(env)
     grade = await grade_named(client, "A")
 
     tutor = await register(client, email)
-    await complete_profile(client, tutor, course_unit_id=course_unit["id"])
+    await complete_profile(client, tutor, course_unit=course_unit)
 
     competency = await client.post(
         "/v1/competencies",

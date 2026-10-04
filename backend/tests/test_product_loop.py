@@ -35,12 +35,12 @@ async def test_the_full_tutoring_loop_records_everything_it_promises(
     committed_env: CommittedEnv,
 ) -> None:
     client = committed_env.client
-    course_unit = await first_course_unit(client)
+    course_unit = await first_course_unit(committed_env)
     grade_a = await grade_named(client, "A")
 
     # --- a tutor proves themselves ---------------------------------------
     tutor = await register(client, "loop.tutor@student.mak.ac.ug")
-    await complete_profile(client, tutor, course_unit_id=course_unit["id"])
+    await complete_profile(client, tutor, course_unit=course_unit)
 
     competency = await client.post(
         "/v1/competencies",
@@ -74,7 +74,7 @@ async def test_the_full_tutoring_loop_records_everything_it_promises(
 
     # --- a student asks for help -----------------------------------------
     student = await register(client, "loop.student@student.mak.ac.ug")
-    await complete_profile(client, student)
+    await complete_profile(client, student, course_unit=course_unit)
 
     request = await client.post(
         "/v1/matching/help-requests",
