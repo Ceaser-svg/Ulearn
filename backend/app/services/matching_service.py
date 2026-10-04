@@ -20,7 +20,7 @@ from app.core.exceptions import (
     ValidationProblem,
 )
 from app.models.competency import Competency
-from app.models.course_unit import CourseUnit
+from app.models.course_unit import CourseUnit, University
 from app.models.enums import HelpRequestStatus, TutorStanding, UserRole
 from app.models.session import HelpRequest
 from app.models.user import User, user_roles
@@ -66,6 +66,11 @@ async def create_help_request(
     db.add(request)
     await db.flush()
     await db.refresh(request)
+    # `get_db` owns the transaction and never commits: it rolls back on the way
+    # out, so a service that flushes without committing leaves a row that exists
+    # only inside this request. The student would get a 201 and then a 404 on the
+    # next screen load. Committing is part of performing the write.
+    await db.commit()
     return help_request_response(request)
 
 
@@ -161,6 +166,7 @@ async def select_tutor_for_request(
     request.matched_tutor = tutor
     request.status = HelpRequestStatus.PENDING_CONFIRMATION
     await db.flush()
+    await db.commit()
     return help_request_response(request)
 
 
@@ -202,6 +208,7 @@ async def decline_help_request(
 
     request.status = HelpRequestStatus.DECLINED
     await db.flush()
+    await db.commit()
     return help_request_response(request)
 
 
@@ -458,7 +465,14 @@ async def _search_candidates_for_units(
             selectinload(Competency.user).selectinload(User.tutor_profile),
             selectinload(Competency.user).selectinload(User.university),
             selectinload(Competency.grade),
-            selectinload(Competency.course_unit).selectinload(CourseUnit.university),
+            # The grading scale is reached through `university`, and `_grade_threshold`
+            # is a plain function that cannot await. Without this last hop the
+            # comparison raised MissingGreenlet while building the match list --
+            # which the suite's shared-session fixture concealed, because the
+            # identity map already held the scale from an earlier call.
+            selectinload(Competency.course_unit)
+            .selectinload(CourseUnit.university)
+            .selectinload(University.grading_scale),
             selectinload(Competency.course_unit).selectinload(CourseUnit.subject),
         )
         # `id` breaks a tie `created_at` alone leaves open, because the dedup

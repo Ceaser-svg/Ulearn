@@ -1,4 +1,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Every build type needs the network: the app is useless to a student
+         without it. It used to be declared only in the debug and profile
+         overlays, which means a release APK merged from `main` alone shipped
+         with no INTERNET permission and could not reach the API at all. That is
+         a failure no debug build would ever reveal, because debug is the one
+         build type that did have it.
+
+         Declared once, here, so all three build types inherit it. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="PeerPass"
         android:name="${applicationName}"

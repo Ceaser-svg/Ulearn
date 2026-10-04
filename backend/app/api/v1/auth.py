@@ -8,7 +8,7 @@ failure becomes a response body.
 
 from typing import Annotated
 
-from fastapi import APIRouter, Body, status
+from fastapi import APIRouter, Body, Request, status
 
 from app.api.deps import CurrentUser, DatabaseSession
 from app.schemas.user import (
@@ -18,7 +18,7 @@ from app.schemas.user import (
     RefreshRequest,
     RegisterRequest,
 )
-from app.services import auth_service
+from app.services import auth_service, rate_limit
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -29,24 +29,40 @@ router = APIRouter(prefix="/auth", tags=["auth"])
     status_code=status.HTTP_201_CREATED,
     summary="Create an account",
 )
-async def register(payload: RegisterRequest, db: DatabaseSession) -> AuthResponse:
+async def register(
+    payload: RegisterRequest, db: DatabaseSession, request: Request
+) -> AuthResponse:
     """Register and receive a token pair.
 
     201 rather than 200 because a resource was created, and the response body is
     the new account alongside its first tokens -- one round trip, so the client
     never holds a valid token it cannot yet render a name for.
+
+    Takes the `Request` only to learn who is calling: registration costs a full
+    Argon2 hash, so the endpoint needs a per-address ceiling and the address is
+    on the socket, not in the body.
     """
-    return await auth_service.register(db, payload)
+    return await auth_service.register(
+        db, payload, client_address=rate_limit.client_ip(request)
+    )
 
 
 @router.post("/login", response_model=AuthResponse, summary="Sign in")
-async def login(payload: LoginRequest, db: DatabaseSession) -> AuthResponse:
+async def login(
+    payload: LoginRequest, db: DatabaseSession, request: Request
+) -> AuthResponse:
     """Exchange credentials for a token pair.
 
     A wrong password and an unknown address are the same 401 with the same body.
     That is deliberate; see `app.services.auth`.
+
+    Takes the `Request` only to learn who is calling, for the same reason
+    registration does. Wrong passwords are counted per account *and* per
+    address, and the second of those is not in the body.
     """
-    return await auth_service.authenticate(db, payload)
+    return await auth_service.authenticate(
+        db, payload, client_address=rate_limit.client_ip(request)
+    )
 
 
 @router.post(

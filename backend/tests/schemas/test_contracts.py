@@ -25,7 +25,7 @@ from app.models.enums import (
 from app.schemas import (
     MAX_RATING,
     MIN_RATING,
-    CompetencyReviewRequest,
+    AdminCompetencyReviewRequest,
     HelpRequestCreate,
     LoginRequest,
     Page,
@@ -301,22 +301,27 @@ class TestRegistration:
             )
 
 
-class TestCompetencyReview:
+class TestAdminCompetencyReview:
+    """These rules moved from the student-facing review schema when review became
+    an operator-only action. The owner could otherwise mark their own submission
+    verified, which is not a review. The rules themselves are unchanged: a
+    rejection still has to say why."""
+
     def test_rejecting_without_a_reason_is_rejected(self) -> None:
         """A refusal the tutor cannot act on is a refusal they will not retry."""
         with pytest.raises(ValidationError, match="rejection_reason"):
-            CompetencyReviewRequest(status=CompetencyStatus.REJECTED)
+            AdminCompetencyReviewRequest(status=CompetencyStatus.REJECTED)
 
     def test_a_blank_rejection_reason_is_rejected(self) -> None:
         with pytest.raises(ValidationError, match="rejection_reason"):
-            CompetencyReviewRequest(
+            AdminCompetencyReviewRequest(
                 status=CompetencyStatus.REJECTED,
                 rejection_reason="   ",
             )
 
     def test_verifying_drops_a_stale_rejection_reason(self) -> None:
         """A record that says both verified and rejected is worse than neither."""
-        review = CompetencyReviewRequest(
+        review = AdminCompetencyReviewRequest(
             status=CompetencyStatus.VERIFIED,
             rejection_reason="transcript was illegible",
         )

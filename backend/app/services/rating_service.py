@@ -95,6 +95,7 @@ async def submit_rating(
             profile.rating_count += 1
             await _recompute_standing(db, profile)
         await db.flush()
+        await db.commit()
         await db.refresh(rating)
         return RatingResponse.model_validate(rating)
 
@@ -115,6 +116,7 @@ async def submit_rating(
         )
         await _recompute_standing(db, profile)
     await db.flush()
+    await db.commit()
     await db.refresh(existing)
     return RatingResponse.model_validate(existing)
 

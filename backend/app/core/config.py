@@ -181,6 +181,110 @@ class Settings(BaseSettings):
         ),
     )
 
+    password_hash_max_concurrency: int = Field(
+        default=4,
+        ge=1,
+        le=64,
+        description=(
+            "How many password hashes may be computed at once, per process. "
+            "This is a memory setting, not a throughput one: each concurrent "
+            "hash holds roughly `password_hash_memory_kib` of resident memory "
+            "for its duration, so the ceiling is what stops a burst of sign-in "
+            "attempts from becoming an out-of-memory kill instead of a slow "
+            "response. Beyond this, hashing queues. Raise it on an instance "
+            "that has the RAM for it; the calculation is "
+            "max_concurrency * memory_kib against the container's limit."
+        ),
+    )
+
+    # --- Rate limiting ------------------------------------------------------
+    #
+    # Policy, not mechanics. The limiter itself is one mechanism; these numbers
+    # are the decisions a deployment has to make about its own users, and they are
+    # separated here so that changing one does not mean reading the limiter's
+    # source to find out what it does.
+    #
+    # The account and IP ceilings differ by roughly 4x, and the reason is worth
+    # stating because it looks like an inconsistency otherwise. A university
+    # campus puts thousands of students behind one public address, so an IP
+    # ceiling low enough to stop an attacker is also low enough that one hall
+    # locking each other out of their own sign-in form is a real outcome. The
+    # account ceiling is per-student and can therefore be strict; the IP ceiling
+    # is shared infrastructure and cannot.
+
+    auth_login_max_attempts: int = Field(
+        default=5,
+        ge=1,
+        le=100,
+        description=(
+            "Wrong passwords before one account is locked out. Per account, so "
+            "this is a statement about a single student, and 5 is low on purpose."
+        ),
+    )
+
+    auth_login_lockout_seconds: int = Field(
+        default=900,
+        ge=1,
+        description="How long a locked-out account stays locked.",
+    )
+
+    auth_login_ip_max_attempts: int = Field(
+        default=20,
+        ge=1,
+        le=1000,
+        description=(
+            "Wrong passwords from one client address before that address is "
+            "throttled. Higher than the per-account ceiling because a campus "
+            "NAT shares one address across many students; see the section note."
+        ),
+    )
+
+    auth_login_ip_lockout_seconds: int = Field(
+        default=900,
+        ge=1,
+        description="How long a throttled client address stays throttled.",
+    )
+
+    auth_register_ip_max_attempts: int = Field(
+        default=50,
+        ge=1,
+        le=1000,
+        description=(
+            "New accounts from one client address per lockout period. "
+            "Registration is the endpoint an attacker wants for denial of "
+            "service: each accepted sign-up costs a full Argon2 hash, so this "
+            "is the ceiling on how much CPU one address can buy. It is much "
+            "higher than the sign-in ceiling because legitimate registrations "
+            "are genuinely bursty at the start of term, and a NAT means they all "
+            "arrive from one address."
+        ),
+    )
+
+    auth_register_ip_lockout_seconds: int = Field(
+        default=3600,
+        ge=1,
+        description="How long registration is throttled for one client address.",
+    )
+
+    trusted_proxy_hops: int = Field(
+        default=0,
+        ge=0,
+        le=10,
+        description=(
+            "How many reverse proxies sit in front of this process. 0 means "
+            "trust no proxy header at all and use the socket address. This "
+            "number is a security setting with no safe default, because both "
+            "directions are dangerous and they fail differently. Trusting a "
+            "header nobody set: an attacker adds their own `X-Forwarded-For` "
+            "and gets a fresh rate-limit identity per request, so the IP limit "
+            "does nothing. Trusting too few hops when a proxy is actually "
+            "present: every request looks like it came from the proxy, so the "
+            "entire user base shares one counter and one student guessing "
+            "wrong locks out the campus. Count the proxies exactly. See "
+            "`app.services.rate_limit.client_ip`."
+        ),
+    )
+
     # --- Transport ----------------------------------------------------------
 
     cors_origins: PlainStringList = Field(

@@ -23,6 +23,7 @@ from app.models.enums import (
     VerificationSource,
 )
 from app.models.grading_scale import Grade, GradingScale
+from app.models.rate_limit import RateLimitCounter
 from app.models.rating import MAX_RATING, MIN_RATING, Rating
 from app.models.session import HelpRequest, Session
 from app.models.tutor_profile import TutorProfile
@@ -50,6 +51,7 @@ __all__ = [
     "HelpRequest",
     "HelpRequestStatus",
     "Program",
+    "RateLimitCounter",
     "Rating",
     "RefreshToken",
     "Session",

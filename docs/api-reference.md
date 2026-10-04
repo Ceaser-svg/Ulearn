@@ -84,10 +84,31 @@ served as `application/problem+json`. The client has one shape to parse.
 | ---------- | ------------------------------------------------------------------ |
 | `detail`   | Human-readable and **safe to show a student**. Never a stack trace, SQL fragment, or token. |
 | `code`     | Stable machine-readable slug. Absent on the rare 4xx built directly from an `HTTPException`. |
-| `errors`   | Field name → reason. **Present only on validation rejections** (422). |
+| `errors`   | Field name → reason, **or** a single `retry_after_seconds` integer on a 429. |
 
 The envelope is rendered once, in `backend/app/main.py`. A route raises; it never
 builds an error body by hand.
+
+### `Retry-After`
+
+Every 429 carries the wait in two places, on purpose:
+
+- The **`Retry-After` header**, in seconds. This is what RFC 6585 asks for and
+  what reverse proxies, load balancers and SDKs read.
+- **`errors.retry_after_seconds`** in the body, as a JSON integer, not a string.
+  This project's own clients read that.
+
+Send one without the other and either the spec or the app is wrong, and both kinds
+of consumer exist.
+
+### `X-Request-ID`
+
+Every response carries one. Send your own and it is echoed back when it is a
+plain token (letters, digits, `.`, `_`, `~`, `-`, up to 200 characters); anything
+else is replaced with a generated id, because the value reaches log text and a
+newline in it would be an injection primitive. The same value is attached to
+every log record for the request, including a 500, so quoting it in a bug report
+lets an operator find the exact request. Treat it as opaque.
 
 ### Status codes
 
@@ -99,6 +120,7 @@ builds an error body by hand.
 | 404    | `not_found`             | Absent, or not visible to this caller.                       |
 | 409    | `conflict`              | Collided with existing state. Expected on a retried mobile request. |
 | 422    | `validation_failed`     | One or more submitted values were rejected. Carries `errors`. |
+| 429    | `too_many_requests`     | Too many attempts. Wait the interval in `Retry-After`.        |
 | 500    | `internal_error`        | Unhandled fault. The cause is logged server-side; the body says nothing about it. |
 
 ## Auth
@@ -127,6 +149,7 @@ holds a valid token it cannot yet render a name for.
 | ------ | ---------------------------------------------------- |
 | 409    | `An account already exists for that email address.`  |
 | 422    | `That password cannot be accepted.` — the reason is in `errors.password` |
+| 429    | `Too many accounts created from this network. Try again later.` |
 
 The password is 8–128 characters, must not be entirely whitespace, and is
 checked against a common-password deny-list. The reason is returned as
@@ -160,12 +183,64 @@ Exchange credentials for a token pair. No auth.
 | ------ | ---------------------------------------------- |
 | 401    | `That email or password is not right.`         |
 | 422    | Field-level, from the request schema.          |
+| 429    | `Too many sign-in attempts. Wait before trying again.` |
 
 An unknown address and a wrong password produce the **same** 401, the same body,
 and the same work. A decoy Argon2 verification runs when the account is not
 found, so response time does not distinguish the two cases. This is deliberate:
 the pilot's realistic attacker holds a list of student addresses, and telling
 them which of them have an account hands over half the target.
+
+### Sign-in rate limits
+
+Two counters, both checked before any Argon2 work. Each is per key, so one
+student's lockout never affects anyone else:
+
+| Counter | Keyed on | Default ceiling | Cooldown |
+| ------- | -------- | --------------- | -------- |
+| Account | The normalised email address | 5 failures | 15 min |
+| Client address | The caller's IP | 20 failures | 15 min |
+
+The fifth wrong password still returns 401 — the student is entitled to the tries
+they were given — and the sixth returns 429. A successful sign-in **clears the
+account counter but not the address counter**: clearing the address budget would
+let anyone holding one valid account launder an unlimited number of guesses by
+signing in between runs.
+
+The address ceiling is the one that bounds a spraying attack, where every target
+account starts at zero failures. Without it, a per-account limit alone does not
+slow that attack down at all.
+
+A 429 is returned for a locked account whether the password is right or wrong.
+
+Once an address is throttled, **every** account looks the same from it: unknown
+and known addresses both get the identical 429 body. Were a throttled request to
+answer 401 for an unknown address and 429 for a locked one, the ceiling would
+hand out the list of which addresses hold accounts — undoing the decoy burn
+above.
+
+Sign-up is throttled per address too, at 50 accepted registrations per hour by
+default. Each registration that reaches the password hash costs a full Argon2
+operation, so that budget bounds CPU rather than merely counting requests.
+
+**Both outcomes are charged.** A registration that succeeds *and* one refused as
+a duplicate both draw on the same budget, because both have already paid for the
+hash by the time the answer is sent. Charging only the successes — which is what
+this did at first — leaves the endpoint with an unbounded hashing budget for
+anyone sending addresses that already exist, and such a request returns 409, which
+identifies real student accounts *and* buys unlimited CPU while never being
+counted. The duplicate is still answered with
+`An account already exists for that email address.` until the budget is spent;
+throttling never replaces that message with an error the student cannot act on.
+
+A rejection that happens *before* the hash is not charged, because it costs
+nothing: a password on the deny-list, a password too short or too long for the
+schema, or a caller already throttled. So a student who fumbles the policy a few
+times is not charged for it.
+
+All seven settings are configurable, and the defaults are in
+`backend/app/core/config.py`. See `docs/architecture.md` for how the client
+address is established and why the counters live in the database.
 
 ### `POST /v1/auth/refresh`
 
@@ -649,14 +724,17 @@ asking "who can take this request" was answered about another course entirely.
 
 ## Sessions
 
-All six routes require a signed-in user and are scoped to the caller's own
+All routes require a signed-in user and are scoped to the caller's own
 sessions; a session the caller is not part of is a 404, not a 403, so the
 response does not confirm that someone else's session exists.
 
 ### `POST /v1/sessions`
 
 Confirms a selected help request and creates the live session. 201 with the
-session, and a generated two-digit `session_pin`.
+session, and a two-digit handshake PIN is issued.
+
+The PIN is **not** in the response. It belongs to the tutor and is read from
+`GET /v1/sessions/{session_id}/pin`; see below for why it is not shared.
 
 ```json
 {
@@ -715,13 +793,47 @@ every call.
 
 ### `POST /v1/sessions/{session_id}/verify-pin`
 
-`{"pin": "42"}` — the tutee submits the code the tutor showed. Moves the session
-to `completed` when the code matches.
+`{"pin": "42"}` — **the tutee submits the code the tutor read out.** Moves the
+session to `in_progress` when the code matches.
 
-Two-digit, and compared for presence rather than authenticity: it is attendance
-evidence that both parties were there, not a secret. A **missing stored PIN is
-refused**, never treated as a match, so a session that never received a code
-cannot be completed by submitting an empty one. A wrong code is a 400.
+The tutee only. A tutor asking here gets a 403: they are the one reading the
+digits aloud, so entering them would prove nothing, and it would let a tutor
+start a session on behalf of a student who never arrived.
+
+Two-digit, so the whole search space is 100 values, which is why attempts are
+counted. After **5** wrong entries the tutee is put on a **15 minute** cooldown
+and every further attempt — including the correct one — is a **429** carrying
+`retry_after_seconds`. The counter is on the session row, not in process memory,
+so it survives a restart and is shared across workers; it is committed on the
+failure path, and reset by a success. A **missing stored PIN is refused**, never
+treated as a match.
+
+### `GET /v1/sessions/{session_id}/pin`
+
+The tutor's half of the handshake: the two digits to read out. **403 for the
+tutee**, because a tutee who could read their own code would have nothing to
+prove. Unavailable once the session has started.
+
+```json
+{
+  "session_id": "9f35…",
+  "session_pin": "42",
+  "attempts_remaining": 5
+}
+```
+
+`attempts_remaining` is advisory, and exists so a tutor can stop a student
+guessing in a room where they are trying to learn. The lockout itself is the
+API's: a ceiling counted on a device is one a student clears by reinstalling the
+app.
+
+### Starting a session
+
+Starting is reachable **only** through `verify-pin`. `POST
+/v1/sessions/{id}/transition` used to accept a `pin` field and check it inline
+with no attempt counter, which made all 100 candidates walkable without touching
+the cooldown; it now refuses `in_progress` and points here. One path means the
+ceiling cannot be circumvented.
 
 ## Ratings
 

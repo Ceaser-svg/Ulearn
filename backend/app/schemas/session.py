@@ -29,6 +29,12 @@ MAX_CANCELLATION_REASON_LENGTH = 500
 MIN_DURATION_MINUTES = 1
 MAX_DURATION_MINUTES = 480
 
+#: The handshake pin is exactly two digits, matching `sessions.session_pin`'s
+#: `String(2)` and its `session_pin_length` check constraint. Bounded here so an
+#: oversized candidate is a validation error naming the field rather than a wrong
+#: PIN the tutee is told to try again with.
+MAX_PIN_LENGTH = 2
+
 
 class HelpRequestCreate(RequestSchema):
     """A student asking for help with a course unit.
@@ -138,11 +144,11 @@ class SessionTransitionRequest(RequestSchema):
     cancellation_reason: Trimmed | None = Field(
         default=None, max_length=MAX_CANCELLATION_REASON_LENGTH
     )
-    pin: Trimmed | None = Field(
-        default=None,
-        max_length=2,
-        description="Two-digit PIN shown by the tutee to verify a session start.",
-    )
+    # No `pin` field. Starting a session is `POST /v1/sessions/{id}/verify-pin`
+    # and nothing else: the pin used to be accepted here as well, with no attempt
+    # counter, which made the throttle on the real endpoint optional. Accepting a
+    # field and ignoring it would be worse than removing it, so a client still
+    # sending one gets a 422 from `extra="forbid"` rather than a silent success.
 
     @model_validator(mode="after")
     def reason_required_when_cancelling(self) -> Self:
@@ -192,9 +198,6 @@ class SessionResponse(OrmSchema):
     started_at: datetime | None = None
     ended_at: datetime | None = None
     duration_minutes: int = Field(ge=0)
-    session_pin: str | None = Field(
-        default=None, description="Backend-generated handshake pin."
-    )
     meeting_link: str | None = Field(
         default=None, description="Shared meeting link for the session."
     )
@@ -206,3 +209,40 @@ class SessionResponse(OrmSchema):
         )
     )
     created_at: datetime
+
+
+class SessionPinResponse(OrmSchema):
+    """The handshake pin, for the tutor who has to read it aloud.
+
+    Split out from `SessionResponse` rather than added there as an optional field
+    because the pin belongs to one party. In the shared response it was readable
+    by the tutee as well, which made the handshake something the tutee could
+    simply skip: there was no secret left to prove knowledge of.
+    """
+
+    session_id: uuid.UUID
+    session_pin: str = Field(
+        description="The two digits the tutor reads out for the tutee to enter."
+    )
+    attempts_remaining: int = Field(
+        ge=0,
+        description=(
+            "Wrong entries left before the tutee is put on a cooldown. The tutor "
+            "can see the lock coming and say the right thing instead of letting a "
+            "student stand there guessing."
+        ),
+    )
+
+
+class VerifyPinRequest(RequestSchema):
+    """The digits the tutee is entering.
+
+    A schema rather than the `dict[str, str]` the route used to accept: an
+    untyped body means a missing `pin` arrives as `""` and fails later as an
+    incorrect PIN, so a client bug is reported to the user as a wrong PIN.
+    """
+
+    pin: str = Field(
+        pattern=r"^[0-9]{2}$",
+        description="The two digits the tutor read out.",
+    )

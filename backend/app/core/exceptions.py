@@ -27,6 +27,7 @@ class ProblemException(Exception):
         title: str | None = None,
         code: str | None = None,
         errors: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         super().__init__(detail)
         self.detail = detail
@@ -34,6 +35,13 @@ class ProblemException(Exception):
         self.title = title or _DEFAULT_TITLES.get(status_code, "Error")
         self.code = code
         self.errors = errors or {}
+        #: Response headers this failure requires. Distinct from `errors`, which
+        #: is rendered inside the body: RFC 6585 expects `Retry-After` as a
+        #: header, and infrastructure in front of the API -- a gateway, a CDN, a
+        #: client's retry policy -- reads headers and never parses problem
+        #: documents. Before this existed, a 429's only machine-readable wait
+        #: time was buried in the JSON, where such a caller cannot see it.
+        self.headers = headers or {}
 
     def to_problem(self, instance: str) -> dict[str, Any]:
         """The RFC 9457 document for this error."""
@@ -121,6 +129,47 @@ class NotFoundProblem(ProblemException):
             status_code=status.HTTP_404_NOT_FOUND,
             title="Not found",
             code="not_found",
+        )
+
+
+class TooManyRequestsProblem(ProblemException):
+    """Too many attempts, and the caller has to wait.
+
+    A distinct 429 rather than a 403 so a client can tell "you are not allowed"
+    from "you are not allowed *yet*": the first needs a different account, the
+    second needs patience. Collapsing them teaches every client to log the user
+    out on a lockout.
+    """
+
+    def __init__(
+        self,
+        detail: str = "Too many attempts. Try again shortly.",
+        *,
+        retry_after_seconds: int | None = None,
+    ) -> None:
+        super().__init__(
+            detail,
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            title="Too many requests",
+            code="too_many_requests",
+            errors=(
+                # An integer here, unlike the header below. A header value is
+                # text by the rules of HTTP, but a JSON number is what a typed
+                # client expects, and `"900"` forces every consumer to parse
+                # what the schema already declared as an int.
+                {"retry_after_seconds": retry_after_seconds}
+                if retry_after_seconds is not None
+                else None
+            ),
+            # Emitted in both places on purpose. The header is what RFC 6585 asks
+            # for and what intermediaries act on; the body field is what this
+            # project's own clients read. Sending one without the other means
+            # either the spec or the app is wrong, and both consumers exist.
+            headers=(
+                {"Retry-After": str(retry_after_seconds)}
+                if retry_after_seconds is not None
+                else None
+            ),
         )
 
 

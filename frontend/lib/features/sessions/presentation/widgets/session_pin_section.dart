@@ -2,24 +2,26 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:peerpass/core/constants/app_dimens.dart';
+import 'package:peerpass/core/error/failures.dart';
 import 'package:peerpass/features/sessions/data/models/session_model.dart';
+import 'package:peerpass/features/sessions/data/repositories/sessions_repository.dart';
 import 'package:peerpass/features/sessions/presentation/providers/session_providers.dart';
 
 /// The two-digit handshake that starts a session in person.
 ///
-/// The team's signature move, and until now invisible: a session is created with
-/// a PIN the API generates, the tutee shows it, and the tutor types it to start.
-/// Both halves live here because the two are one flow -- a student holding digits
-/// and a tutor expecting them -- and splitting them would have meant either two
-/// screens or a screen that guessed which one to be.
+/// The tutor reveals the digits and the tutee enters them. It was the other way
+/// round, which made the handshake prove nothing: the student held the answer on
+/// their own screen, and the tutor typed what they were shown. Worse, the API put
+/// the pin in a payload both parties could read, so the tutee could skip the tutor
+/// entirely.
 ///
-/// The PIN is never generated here. It is displayed or typed, and the API decides
-/// whether it was right: a client that could mint or guess a PIN would make the
-/// handshake a formality, which is the only thing it is.
+/// Both halves live in one file because they are one flow -- a tutor reading two
+/// digits aloud and a student typing them -- and splitting them would have meant
+/// either two screens or a screen guessing which one to be.
 ///
-/// Nothing on this side counts attempts or locks anybody out. Throttling is the
-/// API's, and a lock the device enforces is one a student clears by reinstalling
-/// the app.
+/// The PIN is never generated here, and this side counts no attempts or locks
+/// anybody out. Both are the API's: a lock a device enforces is one a student
+/// clears by reinstalling the app.
 class SessionPinSection extends ConsumerStatefulWidget {
   const SessionPinSection({
     required this.session,
@@ -34,8 +36,8 @@ class SessionPinSection extends ConsumerStatefulWidget {
   ///
   /// Nullable because the profile loads on its own schedule and a session can be
   /// on screen before it arrives. A null id renders nothing rather than guessing a
-  /// side: the PIN goes to one party and not the other, so showing the wrong half
-  /// is worse than showing none until the profile lands.
+  /// side: showing the wrong half is worse than showing none until the profile
+  /// lands.
   final String? viewerId;
 
   @override
@@ -45,12 +47,16 @@ class SessionPinSection extends ConsumerStatefulWidget {
 class _SessionPinSectionState extends ConsumerState<SessionPinSection> {
   final _pin = TextEditingController();
 
-  /// Whether the tutee has the digits on screen.
+  /// The pin the API returned, fetched when the tutor asks to see it.
   ///
-  /// Local state on purpose, and hidden again on demand: a PIN is shown in a room
-  /// with other people in it, so leaving it on screen for the rest of the session
-  /// is a longer exposure than the moment the tutor needs it.
-  bool _revealed = false;
+  /// Not read off [SessionModel], which no longer carries one. A field there would
+  /// be readable by the tutee too, and a tutee holding their own PIN is a
+  /// handshake nobody has to take part in.
+  SessionPinModel? _pin_;
+
+  /// Set when the pin could not be fetched, so the panel can say so rather than
+  /// offering a reveal that silently does nothing.
+  bool _revealFailed = false;
 
   @override
   void dispose() {
@@ -65,8 +71,9 @@ class _SessionPinSectionState extends ConsumerState<SessionPinSection> {
 
     final content = switch (session.status) {
       TutoringSessionStatus.scheduled => switch (widget.viewerId) {
-        final viewerId? when session.isTutee(viewerId) => _reveal(context, session),
-        final viewerId? when session.isTutor(viewerId) => _enter(context, state),
+        // Reversed from the original: the tutor reveals, the tutee enters.
+        final viewerId? when session.isTutor(viewerId) => _reveal(context),
+        final viewerId? when session.isTutee(viewerId) => _enter(context, state),
         _ => null,
       },
       // Once the session is live the handshake has done its job, and the pin is
@@ -87,18 +94,36 @@ class _SessionPinSectionState extends ConsumerState<SessionPinSection> {
     );
   }
 
-  /// The tutee's half: the digits, to be shown to the tutor.
-  Widget _reveal(BuildContext context, SessionModel session) {
+  /// The tutor's half: the digits to read out.
+  Widget _reveal(BuildContext context) {
     final theme = Theme.of(context);
-    final pin = session.sessionPin;
+    final pin = _pin_;
+
+    if (_revealFailed) {
+      return const _Panel(
+        icon: Icons.cloud_off_outlined,
+        title: 'PIN unavailable',
+        body:
+            'The handshake PIN could not be loaded. Check your connection and '
+            'try again.',
+      );
+    }
 
     if (pin == null) {
-      return const _Panel(
-        icon: Icons.lock_open_outlined,
-        title: 'No PIN was issued',
+      return _Panel(
+        icon: Icons.visibility_outlined,
+        title: 'Your handshake PIN',
         body:
-            'This session has no handshake PIN stored, so it cannot be started '
-            'with one. Ask your tutor to start it another way.',
+            'Read these two digits to your student. They enter them on their '
+            'side and the session starts.',
+        trailing: Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: _fetchPin,
+            icon: const Icon(Icons.download_outlined),
+            label: const Text('Show PIN'),
+          ),
+        ),
       );
     }
 
@@ -106,39 +131,66 @@ class _SessionPinSectionState extends ConsumerState<SessionPinSection> {
       icon: Icons.pin_outlined,
       title: 'Your handshake PIN',
       body:
-          'Show these two digits to your tutor. They enter them on their side '
+          'Read these two digits to your student. They enter them on their side '
           'and the session starts.',
-      trailing: _revealed
-          ? Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SelectableText(
-                  pin,
-                  style: theme.textTheme.headlineMedium?.copyWith(
-                    // Tabular figures so two digits do not shift as they are
-                    // read aloud, which is the one thing this value is for.
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
-                ),
-                const SizedBox(height: AppDimens.xs),
-                TextButton(
-                  onPressed: () => setState(() => _revealed = false),
-                  child: const Text('Hide PIN'),
-                ),
-              ],
-            )
-          : Align(
-              alignment: Alignment.centerLeft,
-              child: OutlinedButton.icon(
-                onPressed: () => setState(() => _revealed = true),
-                icon: const Icon(Icons.visibility_outlined),
-                label: const Text('Reveal PIN'),
+      trailing: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SelectableText(
+            pin.sessionPin,
+            style: theme.textTheme.headlineMedium?.copyWith(
+              // Tabular figures so two digits do not shift as they are read
+              // aloud, which is the one thing this value is for.
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+          // Advisory only. The lockout is the API's; this is here so a tutor can
+          // stop the tutee guessing rather than let them burn every attempt in a
+          // room where they are trying to learn.
+          if (pin.attemptsRemaining <= 2) ...[
+            const SizedBox(height: AppDimens.xs),
+            Text(
+              pin.attemptsRemaining == 0
+                  ? 'Your student has used every attempt. They will have to wait '
+                        'before trying again.'
+                  : 'Your student has ${pin.attemptsRemaining} attempt'
+                        '${pin.attemptsRemaining == 1 ? '' : 's'} left.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.error,
               ),
             ),
+          ],
+          const SizedBox(height: AppDimens.xs),
+          TextButton(
+            // Clears the pin rather than flipping a local flag: nothing is held
+            // once the tutor has read it, so the value does not outlive its use
+            // on a phone lying face up on a table.
+            onPressed: () => setState(() => _pin_ = null),
+            child: const Text('Hide PIN'),
+          ),
+        ],
+      ),
     );
   }
 
-  /// The tutor's half: the digits the student just showed them.
+  Future<void> _fetchPin() async {
+    final repo = ref.read(sessionsRepositoryProvider);
+    try {
+      final pin = await repo.revealPin(sessionId: widget.session.id);
+      if (!mounted) return;
+      setState(() {
+        _pin_ = pin;
+        _revealFailed = false;
+      });
+    } on Failure {
+      // Deliberately not showing the API's text: a failed reveal is a transport
+      // problem, and the retry is the same either way.
+      if (!mounted) return;
+      setState(() => _revealFailed = true);
+    }
+  }
+
+  /// The tutee's half: the digits the tutor just read out.
   Widget _enter(BuildContext context, SessionDetailState state) {
     final theme = Theme.of(context);
     final submitting = state.submitting;
@@ -153,8 +205,8 @@ class _SessionPinSectionState extends ConsumerState<SessionPinSection> {
       icon: Icons.dialpad_outlined,
       title: 'Enter the handshake PIN',
       body:
-          'Your student is showing you two digits. Enter them here and the '
-          'session starts.',
+          'Your tutor is reading you two digits. Enter them here and the session '
+          'starts.',
       trailing: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -229,7 +281,8 @@ class _SessionPinSectionState extends ConsumerState<SessionPinSection> {
 /// written for a tutor standing in front of a student, and it says what to do next
 /// rather than only what went wrong. The API's own message is still available
 /// through [SessionDetailState.actionFailure] for a client that wants it.
-const String _wrongPin = 'That is not the right PIN. Ask your student to check it.';
+const String _wrongPin =
+    'That is not the right PIN. Ask your tutor to check it.';
 
 /// The frame both halves of the handshake share.
 class _Panel extends StatelessWidget {

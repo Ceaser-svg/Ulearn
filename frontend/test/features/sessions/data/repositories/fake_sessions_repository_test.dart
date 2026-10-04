@@ -50,10 +50,12 @@ void main() {
       expect(created.tuteeId, 'student-1');
       expect(created.tutorId, 'tutor-1');
       expect(created.durationMinutes, 45);
-      // A PIN, because the session cannot be started without one and a fake that
-      // returned a session with none would make a screen test pass that the app
-      // could not act on.
-      expect(created.sessionPin, isNotNull);
+      // A PIN is issued, and it is not on the session. The fake has to serve it
+      // the way the API does -- through `revealPin`, tutor-only -- so a screen
+      // test cannot pass by reading the pin off a payload a tutee could also read.
+      final pin = await fake.revealPin(sessionId: created.id);
+      expect(pin.sessionPin, hasLength(2));
+      expect(pin.attemptsRemaining, FakeSessionsRepository.maxPinAttempts);
     });
 
     test('the created session joins the list the screen already has', () async {

@@ -6,12 +6,16 @@ the Argon2 hasher or the JWT library directly, so either algorithm can change
 without touching a service.
 """
 
+import asyncio
+import atexit
 import contextlib
 import hashlib
 import hmac
 import secrets
 import sys
 import uuid
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
@@ -212,6 +216,10 @@ def password_needs_rehash(stored: str) -> bool:
     The service calls this after a successful verification and rewrites the row,
     which is how a raised floor reaches accounts gradually instead of all at
     once.
+
+    Deliberately *not* wrapped in `to_thread`: it only parses the parameters out
+    of the PHC string and compares numbers, so there is no Argon2 work to move
+    off the loop.
     """
     if stored.startswith(_PBKDF2_PREFIX):
         return True
@@ -222,6 +230,82 @@ def password_needs_rehash(stored: str) -> bool:
         # "needs rehash" is the safe answer, because the rehash only happens
         # after a *successful* verification, which this hash cannot pass.
         return True
+
+
+# ---------------------------------------------------------------------------
+# Awaitable forms of the three functions above that do Argon2 work.
+#
+# Everything below is synchronous and stays that way. Argon2 is a blocking,
+# memory-hard function and the correct answer to "how do I stop it blocking" is
+# not to make it async -- it is to not run it on the thread whose job is to
+# serve everyone else.
+#
+# Hashing sign-up or signing in costs ~100ms of CPU and 19 MiB of resident
+# memory per call. On the event loop that is not 100ms for the one person
+# signing in; it is 100ms during which *every* concurrent request in the process
+# is not being served, including the requests that are not signing in. A handful
+# of people signing in at once is the entire API stalling, and it looks in the
+# metrics like general slowness rather than like the cause.
+#
+# The GIL is not a problem: `argon2-cffi` computes in Rust and releases the GIL
+# for the duration of the hash, so worker threads genuinely run in parallel.
+#
+# Measured on the sign-in path, worst gap between two event-loop turns while one
+# real login completed: 80.5ms blocking, 16.7ms here. The remainder is database
+# round-trip, not hashing.
+# ---------------------------------------------------------------------------
+
+
+# `to_thread` also does not bound how many run at once, and 19 MiB each means
+# unbounded concurrency is an out-of-memory kill rather than a slow response: the
+# requests queue in the executor rather than each taking its own 19 MiB.
+# `asyncio.to_thread`'s default pool is `min(32, cpu_count + 4)` threads, which
+# on a 12-core machine is a 228 MiB spike from sign-in alone.
+#
+# A dedicated pool sized by configuration is used instead. It is module-level
+# rather than per-loop so that it survives the short-lived event loop each test
+# creates -- `asyncio.to_thread` would build a fresh default executor per loop.
+#
+# Queuing is the intended behaviour under burst, not an oversight: it converts a
+# memory exhaustion into latency, which the rate limiter upstream then keeps
+# bounded.
+@lru_cache(maxsize=1)
+def _argon2_executor() -> ThreadPoolExecutor:
+    max_workers = get_settings().password_hash_max_concurrency
+    executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="argon2")
+    # Interpreter shutdown joins the pool's threads by default. Registering this
+    # explicitly means a busy hash does not keep the process alive past the end
+    # of a script, and that the threads are asked to stop before the interpreter
+    # starts tearing down the runtime they were using.
+    atexit.register(executor.shutdown, wait=True, cancel_futures=True)
+    return executor
+
+
+async def _off_the_loop[T](function: Callable[..., T], /, *args: Any) -> T:
+    """Run a blocking function on the bounded Argon2 pool."""
+    return await asyncio.get_running_loop().run_in_executor(
+        _argon2_executor(), function, *args
+    )
+
+
+async def hash_password_async(password: str) -> str:
+    """[hash_password] without holding the event loop for the duration."""
+    return await _off_the_loop(hash_password, password)
+
+
+async def verify_password_async(password: str, stored: str) -> bool:
+    """[verify_password] without holding the event loop for the duration."""
+    return await _off_the_loop(verify_password, password, stored)
+
+
+async def burn_password_verification_async() -> None:
+    """[burn_password_verification] without holding the event loop.
+
+    On the sign-in path this is the branch that runs when *no* account matched
+    the address, so it was the one blocking call that a script probing for
+    registered email addresses could trigger without knowing a single password.
+    """
+    await _off_the_loop(burn_password_verification)
 
 
 def generate_opaque_token() -> str:

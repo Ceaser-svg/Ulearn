@@ -16,6 +16,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -136,6 +137,12 @@ class Session(Base, TimestampMixin):
             "session_pin IS NULL OR length(session_pin) = 2",
             name="session_pin_length",
         ),
+        # The throttle increments on its error path, so a negative count would
+        # mean a lockout counter that runs backwards.
+        CheckConstraint(
+            "pin_failed_attempts >= 0",
+            name="pin_failed_attempts_not_negative",
+        ),
         # A completed session needs a start and an end, or the hours it
         # contributes to a certificate cannot be established.
         CheckConstraint(
@@ -198,6 +205,24 @@ class Session(Base, TimestampMixin):
 
     duration_minutes: Mapped[int] = mapped_column(nullable=False, default=0)
     session_pin: Mapped[str | None] = mapped_column(String(2), nullable=True)
+
+    #: Consecutive wrong PINs. The pin is two digits, so there are 100 candidates
+    #: and no attempt ceiling is the same as no handshake at all.
+    #:
+    #: Stored on the row rather than in memory because an in-process counter is
+    #: cleared by a restart and is per-worker, so it is weakest exactly when the
+    #: service is busiest and most worth attacking.
+    pin_failed_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+
+    #: When the tutee stopped being able to try again. Null means not locked.
+    #: A cooldown rather than a permanent lock: the session still has to be
+    #: startable, and the tutor is standing there waiting.
+    pin_locked_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     meeting_link: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     cancelled_by_id: Mapped[uuid.UUID | None] = mapped_column(

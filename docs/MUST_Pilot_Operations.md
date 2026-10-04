@@ -93,6 +93,43 @@ Metrics are aggregated for reporting and must not expose individual academic
 records. Operators record the date, cohort denominator, and any known data
 limitations with each report.
 
+## Hosting the apps
+
+Two separate clients ship to students: the Flutter app, and a web build that
+routes on the client. Each needs its own host and each fails in its own way.
+
+**The Flutter web build needs an SPA rewrite, and nothing in this repository can
+provide it.** Because routing happens in the browser, a static host that serves
+files literally will 404 on every deep link and every refresh — `/sessions/123`
+requests a directory that does not exist. The host must serve `index.html` for
+any path that is not a real file:
+
+| Host                     | Configuration                                                        |
+| ------------------------ | -------------------------------------------------------------------- |
+| nginx                    | `try_files $uri $uri/ /index.html;`                                    |
+| Netlify, Vercel, Firebase| rewrite `/*` to `/index.html`                                          |
+| Apache                   | `FallbackResource /index.html`                                        |
+| GitHub Pages             | a `404.html` that redirects to the base path                          |
+
+Symptom to recognise: the app loads at `/` and works, but any refresh or shared
+link returns the host's 404 page. The fix belongs to the host. Do not work
+around it by creating real directories in `frontend/web/` — that produces a site
+where only the routes that happen to have a directory survive, which is a harder
+outage to diagnose than the original.
+
+Verify the rewrite after every host change, before pilot: open a deep route such
+as `/sessions/123` directly in a fresh browser session and confirm it renders the
+app rather than a 404.
+
+**Android release builds need signing material that is not in the repository.**
+`android/key.properties` is git-ignored and read at build time; the four values
+may equally come from the environment. A build with none of them fails on
+purpose. Never let it fall back to the debug key: a release APK signed with the
+debug key installs, and then can never be updated, because the store rejects
+every later build for a changed signing identity. Losing that key means losing
+the listing, so back up the keystore and its passwords somewhere the team can
+reach them, separately from the code.
+
 ## Launch checklist
 
 - [ ] MUST confirms the launch course units and tutor cohort.
@@ -101,5 +138,7 @@ limitations with each report.
 - [ ] Every invited tutor has a review owner and evidence status.
 - [ ] Admin accounts are tested; audit events are visible.
 - [ ] A support and dispute rehearsal has been completed.
+- [ ] The web host's SPA rewrite is configured and verified on a deep route.
+- [ ] The Android release keystore is backed up and reachable by its owners.
 - [ ] Managed-cloud deployment, backup, restore, and rollback gates are
       completed separately; this document does not mark them complete.

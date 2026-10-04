@@ -9,15 +9,26 @@ from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import NotFoundProblem, ValidationProblem
 from app.models.competency import Competency
-from app.models.course_unit import CourseUnit
-from app.models.enums import CompetencyStatus, TutorStanding, UserRole
+from app.models.course_unit import CourseUnit, University
+from app.models.enums import CompetencyStatus
 from app.models.grading_scale import Grade
-from app.models.tutor_profile import TutorProfile
-from app.models.user import User, load_roles, set_roles
-from app.schemas.competency import (
-    CompetencyCreate,
-    CompetencyResponse,
-    CompetencyReviewRequest,
+from app.models.user import User
+from app.schemas.competency import CompetencyCreate, CompetencyResponse
+
+#: Everything `_competency_response` reads, in one place.
+#:
+#: The response builder is a plain function, so it cannot await a lazy load. When
+#: a query omitted one of these the request failed with `MissingGreenlet` while
+#: building its own response -- and under the suite's shared-session fixture it
+#: did not fail at all, because the identity map already held the rows from an
+#: earlier call in the same test. Declaring the set once means a new query cannot
+#: quietly forget part of it.
+_COMPETENCY_LOAD = (
+    selectinload(Competency.user),
+    selectinload(Competency.grade),
+    selectinload(Competency.course_unit)
+    .selectinload(CourseUnit.university)
+    .selectinload(University.grading_scale),
 )
 
 
@@ -26,11 +37,7 @@ async def list_competencies(db: AsyncSession, user: User) -> list[CompetencyResp
     result = await db.execute(
         select(Competency)
         .where(Competency.user_id == user.id)
-        .options(
-            selectinload(Competency.user),
-            selectinload(Competency.course_unit).selectinload(CourseUnit.university),
-            selectinload(Competency.grade),
-        )
+        .options(*_COMPETENCY_LOAD)
         .order_by(Competency.created_at.desc())
     )
     return [_competency_response(row) for row in result.scalars()]
@@ -40,19 +47,27 @@ async def get_competency(
     db: AsyncSession, user: User, competency_id: uuid.UUID
 ) -> CompetencyResponse:
     """One competency, when the caller owns it."""
+    return _competency_response(await _load_competency(db, user, competency_id))
+
+
+async def _load_competency(
+    db: AsyncSession, user: User, competency_id: uuid.UUID
+) -> Competency:
+    """One competency the caller owns, loaded for the response builder.
+
+    The filter is on `public_id` because that is the only id a client is ever
+    given. Filtering on the internal primary key made this route unreachable:
+    every request carried a public UUID, matched nothing, and returned 404.
+    """
     result = await db.execute(
         select(Competency)
-        .where(Competency.id == competency_id, Competency.user_id == user.id)
-        .options(
-            selectinload(Competency.user),
-            selectinload(Competency.course_unit).selectinload(CourseUnit.university),
-            selectinload(Competency.grade),
-        )
+        .where(Competency.public_id == competency_id, Competency.user_id == user.id)
+        .options(*_COMPETENCY_LOAD)
     )
     competency = result.scalar_one_or_none()
     if competency is None:
         raise NotFoundProblem("That competency record could not be found.")
-    return _competency_response(competency)
+    return competency
 
 
 async def create_competency(
@@ -115,58 +130,11 @@ async def create_competency(
     )
     db.add(competency)
     await db.flush()
-    await db.refresh(competency)
-    return _competency_response(competency)
-
-
-async def review_competency(
-    db: AsyncSession,
-    user: User,
-    competency_id: uuid.UUID,
-    payload: CompetencyReviewRequest,
-) -> CompetencyResponse:
-    """Update a competency's review state.
-
-    This is intentionally narrow: the MVP has no admin role yet, so the only
-    review path is the record's owner updating a submission they personally
-    created. The status still determines whether the tutor role is granted.
-    """
-    result = await db.execute(
-        select(Competency)
-        .where(Competency.id == competency_id, Competency.user_id == user.id)
-        .options(
-            selectinload(Competency.user),
-            selectinload(Competency.course_unit).selectinload(CourseUnit.university),
-            selectinload(Competency.grade),
-        )
-    )
-    competency = result.scalar_one_or_none()
-    if competency is None:
-        raise NotFoundProblem("That competency record could not be found.")
-
-    competency.status = payload.status
-    competency.rejection_reason = payload.rejection_reason
-    if payload.status is CompetencyStatus.VERIFIED:
-        competency.verified_at = _utcnow()
-        roles = set(await load_roles(db, user.id))
-        roles.add(UserRole.TUTOR)
-        await set_roles(db, user.id, roles)
-        has_profile = await db.scalar(
-            select(TutorProfile.id).where(TutorProfile.user_id == user.id)
-        )
-        if has_profile is None:
-            db.add(
-                TutorProfile(
-                    user_id=user.id,
-                    standing=TutorStanding.PROBATIONARY,
-                )
-            )
-    else:
-        competency.verified_at = None
-
-    await db.flush()
-    await db.refresh(competency)
-    return _competency_response(competency)
+    await db.commit()
+    # Re-read rather than building the response off the flushed instance: the
+    # relationships `_competency_response` walks are not populated on a row that
+    # has only just been inserted, and the builder is synchronous.
+    return _competency_response(await _load_competency(db, user, competency.public_id))
 
 
 def _utcnow():

@@ -6,6 +6,10 @@ on:
     branches: [main]
 
 jobs:
+  # The fast job. No Android SDK, no web build: `analyze` and `test` are the
+  # checks a contributor runs on every save, and CI should fail at the same
+  # speed they do. The heavier jobs below are the ones that catch a release
+  # problem, and they are separate so a slow runner does not hold up feedback.
   analyze:
     runs-on: ubuntu-latest
     steps:
@@ -19,3 +23,83 @@ jobs:
         working-directory: frontend
       - run: flutter test
         working-directory: frontend
+
+  # The operations console is a second Flutter app with its own lockfile and
+  # analysis options, and until now nothing ran it on a PR. A console that no
+  # longer compiles must not be discoverable only when an operator needs it.
+  admin-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+        working-directory: admin_web
+      - run: flutter analyze
+        working-directory: admin_web
+      - run: flutter test
+        working-directory: admin_web
+      - run: flutter build web --release
+        working-directory: admin_web
+
+  # The web target is a supported deployment surface, but `flutter analyze`
+  # does not prove it compiles: web-only imports and `dart:html`/`dart:js`
+  # resolution fail at build time, not analysis time.
+  web-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+        working-directory: frontend
+      - run: flutter build web --release
+        working-directory: frontend
+
+  # The release-signing gate is the one control that keeps a store-nonupdatable
+  # artifact from being produced. It is easy to weaken while debugging a build,
+  # and impossible to notice once weakened -- a release that falls back to the
+  # debug key still installs and still uploads. So the gate is asserted here,
+  # not trusted.
+  #
+  # Both directions are checked on purpose. Asserting only that release fails
+  # would pass if the build were broken for an unrelated reason; asserting that
+  # debug succeeds too means the job fails if the gate starts blocking ordinary
+  # development builds.
+  android-release-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+        working-directory: frontend
+
+      - name: Debug build still works without a keystore
+        working-directory: frontend
+        run: flutter build apk --debug
+
+      - name: Release build refuses to run without signing material
+        working-directory: frontend
+        run: |
+          set +e
+          output=$(flutter build apk --release 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -eq 0 ]; then
+            echo "::error::release build succeeded with no signing material; the gate is not enforced"
+            exit 1
+          fi
+          if ! grep -q "Release signing is not configured" <<<"$output"; then
+            echo "::error::release build failed for a reason other than the signing gate"
+            exit 1
+          fi
+          echo "Signing gate enforced."

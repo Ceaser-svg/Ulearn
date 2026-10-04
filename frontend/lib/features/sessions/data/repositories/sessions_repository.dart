@@ -23,6 +23,14 @@ abstract interface class SessionsRepository {
   /// One session by public id.
   Future<SessionModel> session(String sessionId);
 
+  /// The handshake pin the tutor reads out, with the attempts the tutee has left.
+  ///
+  /// The tutor's half only. The tutee asking for this is refused by the API, and
+  /// it must stay that way: a tutee who could read their own pin would have
+  /// nothing to prove, and the tutor no way to tell an in-person student from
+  /// someone guessing two digits on a borrowed account.
+  Future<SessionPinModel> revealPin({required String sessionId});
+
   /// Supplies the handshake pin, and returns the session as it now stands.
   ///
   /// A wrong pin is a `ValidationFailure` naming `pin`; the session is left

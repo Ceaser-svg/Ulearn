@@ -5,9 +5,13 @@ Every test here corresponds to a numbered decision in the security register in
 decision with no test enforcing it is an intention, not a decision.
 """
 
+import asyncio
 import os
 import re
+import threading
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
@@ -19,6 +23,11 @@ from jwt import ExpiredSignatureError
 from app.core import security
 from app.core.config import get_settings
 from app.core.exceptions import AuthenticationProblem
+from app.core.security import (
+    burn_password_verification_async,
+    hash_password_async,
+    verify_password_async,
+)
 
 _A_PASSWORD = "correct horse battery staple"
 
@@ -507,3 +516,172 @@ def _retired_keys(keys: list[str]):
 
 def _pepper(value: str):
     return _settings(TOKEN_PEPPER=value)
+
+
+# ---------------------------------------------------------------------------
+# The awaitable forms exist so that Argon2 does not run on the event loop.
+#
+# These tests are about *where* the work happens, not what it returns -- the
+# return values are covered by the sync tests above. A test that only asserted
+# "hash_password_async('x') == hash_password('x')" would pass just as happily
+# against an implementation that blocks the loop, which is the thing that
+# actually matters here.
+# ---------------------------------------------------------------------------
+
+
+async def test_hashing_runs_on_a_thread_other_than_the_event_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    caller_thread = threading.get_ident()
+    where: list[int] = []
+
+    def _spy(password: str) -> str:
+        where.append(threading.get_ident())
+        return "$argon2id$fake"
+
+    monkeypatch.setattr("app.core.security.hash_password", _spy)
+
+    await hash_password_async("a password")
+
+    assert where and where[0] != caller_thread
+
+
+async def test_verifying_runs_on_a_thread_other_than_the_event_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    caller_thread = threading.get_ident()
+    where: list[int] = []
+
+    def _spy(password: str, stored: str) -> bool:
+        where.append(threading.get_ident())
+        return True
+
+    monkeypatch.setattr("app.core.security.verify_password", _spy)
+
+    assert await verify_password_async("a password", "$argon2id$fake") is True
+    assert where and where[0] != caller_thread
+
+
+async def test_the_burn_on_an_unknown_address_also_leaves_the_loop_free(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The branch that runs for *unregistered* addresses must not block either.
+
+    This is the one that matters most. It fires when no account matched, so it
+    is reachable by anyone who knows an address and nothing else -- the decoy
+    burn exists specifically to stop the response time telling a prober which
+    addresses are registered, and it cannot do that job while it is also
+    freezing the event loop for everyone else.
+    """
+    caller_thread = threading.get_ident()
+    where: list[int] = []
+
+    monkeypatch.setattr(
+        "app.core.security.burn_password_verification",
+        lambda: where.append(threading.get_ident()),
+    )
+
+    await burn_password_verification_async()
+
+    assert where and where[0] != caller_thread
+
+
+async def test_the_event_loop_keeps_serving_requests_during_a_hash() -> None:
+    """A coroutine running alongside a real hash must actually get to run.
+
+    The thread assertions above pin the mechanism down; this one is the
+    behaviour that matters. A blocking implementation leaves the counter at
+    zero for the whole duration of the hash, because the loop never gets
+    scheduled. `asyncio.sleep(0)` alone would not prove it either -- it yields
+    once -- so the task spins until the hash finishes, and any progress at all
+    is evidence the loop stayed free.
+    """
+    ticks = 0
+
+    async def _spin() -> None:
+        nonlocal ticks
+        while True:
+            ticks += 1
+            await asyncio.sleep(0)
+
+    spinner = asyncio.create_task(_spin())
+    await asyncio.sleep(0)  # let the spinner actually start before hashing
+
+    # Measured across the hash rather than from zero. The yield above lets the
+    # spinner tick once on its own, and counting that would make this pass
+    # against the very implementation it is meant to catch.
+    before = ticks
+    try:
+        await hash_password_async("a password worth hashing")
+    finally:
+        spinner.cancel()
+
+    assert ticks > before
+
+
+async def test_concurrent_hashes_are_capped_rather_than_all_held_at_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The cap is a memory ceiling, so it has to be observable, not merely set.
+
+    At 19 MiB a concurrent hash, a pool that grows with the number of waiting
+    requests does not rate-limit anything -- it just decides the order in which
+    the out-of-memory kill arrives. Four workers must stay four workers however
+    many sign-ins are queued behind them.
+    """
+    from app.core import security as security_module
+
+    # One pool, created here. Returning a fresh executor from the patched
+    # callable would hand every waiting request its own pair of workers and
+    # measure nothing.
+    pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="argon2-test")
+    monkeypatch.setattr(security_module, "_argon2_executor", lambda: pool)
+    concurrent = 0
+    peak = 0
+    lock = threading.Lock()
+
+    def _counting_hash(_password: str) -> str:
+        nonlocal concurrent, peak
+        with lock:
+            concurrent += 1
+            peak = max(peak, concurrent)
+        time.sleep(0.02)
+        with lock:
+            concurrent -= 1
+        return "$argon2id$fake"
+
+    monkeypatch.setattr("app.core.security.hash_password", _counting_hash)
+
+    try:
+        await asyncio.gather(*(hash_password_async("a password") for _ in range(12)))
+    finally:
+        pool.shutdown(wait=True)
+
+    assert peak <= 2
+
+
+async def test_the_pool_size_follows_the_setting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ceiling must be configurable, because it is an instance-size decision.
+
+    The calculation is `password_hash_max_concurrency * password_hash_memory_kib`
+    against the container's memory limit. A fixed number is right for one
+    instance and wrong for every other.
+    """
+    from app.core import security as security_module
+
+    monkeypatch.setenv("PASSWORD_HASH_MAX_CONCURRENCY", "7")
+    # Both caches matter: the settings singleton may already hold values from an
+    # earlier test, and the pool is memoised on the first call, so a cleared
+    # settings cache alone still hands back the pool built at the old size.
+    get_settings.cache_clear()
+    security_module._argon2_executor.cache_clear()
+
+    executor = security_module._argon2_executor()
+    try:
+        assert executor._max_workers == 7
+    finally:
+        executor.shutdown(wait=True)
+        security_module._argon2_executor.cache_clear()
+        get_settings.cache_clear()

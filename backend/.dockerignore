@@ -1,0 +1,26 @@
+# What never needs to cross into the build context.
+
+# Secrets. A `.env` copied into an image is a secret in every layer forever.
+.env
+.env.*
+!.env.example
+
+# Local environments and caches.
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# The suite ships with the service, not inside it. Copying tests into the
+# production image copies their fixtures and staging helpers too.
+tests/
+
+# Local databases, logs, and editor state.
+*.db
+*.sqlite3
+*.log
+.idea/
+.vscode/

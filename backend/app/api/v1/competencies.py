@@ -5,11 +5,7 @@ import uuid
 from fastapi import APIRouter, status
 
 from app.api.deps import CurrentUser, DatabaseSession
-from app.schemas.competency import (
-    CompetencyCreate,
-    CompetencyResponse,
-    CompetencyReviewRequest,
-)
+from app.schemas.competency import CompetencyCreate, CompetencyResponse
 from app.services import validation_service
 
 router = APIRouter(prefix="/competencies", tags=["competencies"])
@@ -51,23 +47,3 @@ async def get_competency(
 ) -> CompetencyResponse:
     """A single competency record owned by the signed-in user."""
     return await validation_service.get_competency(db, caller.user, competency_id)
-
-
-@router.patch(
-    "/{competency_id}/review",
-    response_model=CompetencyResponse,
-    summary="Review a competency",
-)
-async def review_competency(
-    competency_id: uuid.UUID,
-    payload: CompetencyReviewRequest,
-    caller: CurrentUser,
-    db: DatabaseSession,
-) -> CompetencyResponse:
-    """Update a competency submission's review status."""
-    return await validation_service.review_competency(
-        db,
-        caller.user,
-        competency_id,
-        payload,
-    )

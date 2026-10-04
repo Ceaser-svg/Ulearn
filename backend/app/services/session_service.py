@@ -1,7 +1,8 @@
 """Tutoring session lifecycle business logic."""
 
+import secrets
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +12,7 @@ from app.core.exceptions import (
     AuthorizationProblem,
     ConflictProblem,
     NotFoundProblem,
+    TooManyRequestsProblem,
     ValidationProblem,
 )
 from app.models.course_unit import CourseUnit
@@ -24,10 +26,28 @@ from app.models.session import HelpRequest, Session
 from app.models.user import User, has_role, load_roles
 from app.schemas.session import (
     SessionCreate,
+    SessionPinResponse,
     SessionResponse,
     SessionTransitionRequest,
 )
 from app.services import rating_service
+
+#: Wrong entries before the tutee is put on a cooldown.
+#:
+#: Low, deliberately. The pin is two digits, so the whole search space is 100 and
+#: a generous limit is barely a limit: at 5, a full sweep of the space costs a
+#: minute of waiting. The handshake proves the tutee was in the room; it is not a
+#: security control, so a handful of tries suits it and the tutor has to be
+#: standing there.
+MAX_PIN_ATTEMPTS = 5
+
+#: How long a tutee is locked out once they have used them all.
+#:
+#: A cooldown rather than a permanent lock, because the session still has to be
+#: startable and both parties are physically present. Fifteen minutes is long
+#: enough that brute-forcing 100 candidates is pointless and short enough that a
+#: genuine typo is not a dead session.
+PIN_LOCKOUT = timedelta(minutes=15)
 
 
 def _utc(dt: datetime) -> datetime:
@@ -111,6 +131,7 @@ async def create_session(
     help_request.status = HelpRequestStatus.MATCHED
     help_request.matched_tutor_id = user.id
     await db.flush()
+    await db.commit()
     await db.refresh(session)
     return await _session_response(db, session)
 
@@ -165,22 +186,22 @@ async def transition_session(
         )
 
     if payload.status is SessionStatus.IN_PROGRESS:
-        if payload.pin is None:
-            raise ValidationProblem(
-                "The pin is required to start the session.",
-                errors={"pin": "required"},
-            )
-        # A missing stored pin is not an empty expected pin. `payload.pin.strip()
-        # == (session.session_pin or "")` would make a whitespace-only pin
-        # compare equal to "" and start a session whose handshake was never
-        # satisfied, so the absence of a pin has to fail closed.
-        expected_pin = (session.session_pin or "").strip()
-        if not expected_pin or payload.pin.strip() != expected_pin:
-            raise ValidationProblem(
-                "The session PIN is incorrect.",
-                errors={"pin": "incorrect"},
-            )
-        session.started_at = _utc(session.started_at or datetime.now(UTC))
+        # Starting used to be accepted here too, with a `pin` field checked
+        # inline. Two problems, and the first is why this is now a refusal
+        # rather than a second code path:
+        #
+        # - It was a bypass. This branch had no attempt counter and no cooldown,
+        #   so the throttle in `verify_session_pin` could be walked around by
+        #   calling this instead, making the lockout decoration.
+        # - It let either party start a session. Under the rule that the tutor
+        #   reveals and the tutee enters, a tutor calling this has simply told
+        #   the server the session is live.
+        #
+        # One code path means the throttle cannot be circumvented by accident.
+        raise ValidationProblem(
+            "Use the PIN endpoint to start this session.",
+            errors={"status": "in_progress requires verify-pin"},
+        )
 
     if payload.status is SessionStatus.COMPLETED:
         if session.started_at is None:
@@ -215,7 +236,50 @@ async def transition_session(
         await rating_service.record_completion(db, session)
 
     await db.flush()
+    await db.commit()
     return await _session_response(db, session)
+
+
+async def reveal_session_pin(
+    db: AsyncSession,
+    user: User,
+    session_id: uuid.UUID,
+) -> SessionPinResponse:
+    """Hand the handshake PIN to the tutor, and to nobody else.
+
+    The tutee is refused here. That refusal is the whole point of the handshake:
+    if a tutee could read their own PIN, there would be nothing to prove, and the
+    tutor would have no way to tell an in-person student from someone guessing
+    two digits on a stolen account.
+    """
+    session = await _load_session_for_user(db, user, session_id)
+    if session.tutor_id != user.id:
+        raise AuthorizationProblem("Only the tutor can see the session PIN.")
+
+    # Stays available until the session starts. Revealing it earlier would let a
+    # tutor collect PINs in advance, which is a use the handshake cannot detect.
+    if session.status is not SessionStatus.SCHEDULED:
+        raise ConflictProblem("This session has already started.")
+
+    pin = (session.session_pin or "").strip()
+    if not pin:
+        raise ConflictProblem("This session has no handshake PIN to reveal.")
+
+    return SessionPinResponse(
+        session_id=session.public_id,
+        session_pin=pin,
+        attempts_remaining=max(0, MAX_PIN_ATTEMPTS - session.pin_failed_attempts),
+    )
+
+
+def _pin_lock_remaining(session: Session) -> int:
+    """Seconds until the tutee may try again, or 0 if they may try now."""
+    if session.pin_locked_until is None:
+        return 0
+    remaining = (
+        _utc(session.pin_locked_until) - _utc(datetime.now(UTC))
+    ).total_seconds()
+    return int(remaining) + 1 if remaining > 0 else 0
 
 
 async def verify_session_pin(
@@ -224,21 +288,63 @@ async def verify_session_pin(
     session_id: uuid.UUID,
     pin: str,
 ) -> SessionResponse:
-    """Verify the two-digit session PIN before the session is marked live."""
+    """The tutee enters the two digits the tutor read out, starting the session.
+
+    Throttled on the row. The pin has 100 possible values, so without a ceiling
+    this endpoint is a free oracle: a caller can walk the whole space in a second
+    and start any session they are a party to.
+    """
     session = await _load_session_for_user(db, user, session_id)
-    # Fails closed for the same reason as the transition path: a session with no
-    # stored pin must reject every candidate, including a blank one.
+
+    # The tutor already has the PIN. Letting them enter it would make the check
+    # something they pass on their own, so the two directions are exclusive.
+    if session.tutee_id != user.id:
+        raise AuthorizationProblem("Only the student can enter the session PIN.")
+
+    if session.status is not SessionStatus.SCHEDULED:
+        raise ConflictProblem("This session is not waiting to start.")
+
+    # Serialize attempts on the session row. Without a row lock, concurrent
+    # guesses can all read the same counter and overwrite one another.
+    locked_result = await db.execute(
+        select(Session).where(Session.id == session.id).with_for_update()
+    )
+    session = locked_result.scalar_one()
+
+    if session.status is not SessionStatus.SCHEDULED:
+        raise ConflictProblem("This session is not waiting to start.")
+
+    waiting = _pin_lock_remaining(session)
+    if waiting:
+        raise TooManyRequestsProblem(
+            "Too many wrong PINs. Wait before trying again.",
+            retry_after_seconds=waiting,
+        )
+
+    # Fails closed: a session with no stored PIN must reject every candidate,
+    # including a blank one, rather than treating "no PIN" as "PIN matches".
     expected = (session.session_pin or "").strip()
-    if not expected or pin.strip() != expected:
+    if not expected or not secrets.compare_digest(pin.strip(), expected):
+        session.pin_failed_attempts += 1
+        if session.pin_failed_attempts >= MAX_PIN_ATTEMPTS:
+            session.pin_locked_until = _utc(datetime.now(UTC) + PIN_LOCKOUT)
+        # Committed rather than left to a rollback. An attempt that is not counted
+        # is an attempt that is free, and the error path is exactly where an
+        # uncommitted counter would be silently discarded.
+        await db.commit()
         raise ValidationProblem(
             "The session PIN is incorrect.",
             errors={"pin": "incorrect"},
         )
-    if session.status is not SessionStatus.SCHEDULED:
-        raise ConflictProblem("This session is not waiting to start.")
+
+    # Reset on success so a later handshake on the same row is not punished for
+    # typos the tutee already recovered from.
+    session.pin_failed_attempts = 0
+    session.pin_locked_until = None
     session.status = SessionStatus.IN_PROGRESS
     session.started_at = _utc(session.started_at or datetime.now(UTC))
     await db.flush()
+    await db.commit()
     return await _session_response(db, session)
 
 
@@ -310,7 +416,6 @@ async def _session_response(db: AsyncSession, session: Session) -> SessionRespon
         started_at=session.started_at,
         ended_at=session.ended_at,
         duration_minutes=session.duration_minutes,
-        session_pin=session.session_pin,
         meeting_link=session.meeting_link,
         is_rated=await session.is_rated(db),
         created_at=session.created_at,

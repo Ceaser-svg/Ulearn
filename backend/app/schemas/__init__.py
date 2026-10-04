@@ -16,6 +16,7 @@ from app.schemas.academic import (
 from app.schemas.admin import (
     AdminAuditEventPage,
     AdminAuditEventResponse,
+    AdminCompetencyReviewRequest,
     AdminUserPage,
     AdminUserResponse,
 )
@@ -30,7 +31,6 @@ from app.schemas.common import (
 from app.schemas.competency import (
     CompetencyCreate,
     CompetencyResponse,
-    CompetencyReviewRequest,
 )
 from app.schemas.matching import (
     MATCH_EXCLUSION_REASONS,
@@ -50,8 +50,10 @@ from app.schemas.session import (
     HelpRequestCreate,
     HelpRequestResponse,
     SessionCreate,
+    SessionPinResponse,
     SessionResponse,
     SessionTransitionRequest,
+    VerifyPinRequest,
 )
 from app.schemas.tutor import (
     DEFAULT_RAIL_TUTORS,
@@ -84,13 +86,13 @@ __all__ = [
     "RAIL_ENDORSED_UNITS",
     "AdminAuditEventPage",
     "AdminAuditEventResponse",
+    "AdminCompetencyReviewRequest",
     "AdminUserPage",
     "AdminUserResponse",
     "AuthResponse",
     "CertificateEligibilityResponse",
     "CompetencyCreate",
     "CompetencyResponse",
-    "CompetencyReviewRequest",
     "CourseUnitResponse",
     "CurrentUserResponse",
     "GradeResponse",
@@ -112,6 +114,7 @@ __all__ = [
     "RegisterRequest",
     "RequestSchema",
     "SessionCreate",
+    "SessionPinResponse",
     "SessionResponse",
     "SessionTransitionRequest",
     "SubjectResponse",
@@ -123,4 +126,5 @@ __all__ = [
     "TutorRatingSummary",
     "UniversityResponse",
     "UserResponse",
+    "VerifyPinRequest",
 ]

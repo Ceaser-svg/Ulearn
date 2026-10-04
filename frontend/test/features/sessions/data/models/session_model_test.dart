@@ -47,7 +47,6 @@ void main() {
       expect(session.status, TutoringSessionStatus.scheduled);
       expect(session.durationMinutes, 60);
       expect(session.isRated, isFalse);
-      expect(session.sessionPin, '42');
       expect(session.meetingLink, 'https://meet.peerpass.test/abc');
       expect(session.scheduledStart, DateTime.utc(2026, 3, 4, 9));
       expect(session.startedAt, DateTime.utc(2026, 3, 4, 9, 5));
@@ -104,14 +103,12 @@ void main() {
           ..remove('scheduled_start')
           ..remove('started_at')
           ..remove('ended_at')
-          ..remove('session_pin')
           ..remove('meeting_link'),
       );
 
       expect(session.scheduledStart, isNull);
       expect(session.startedAt, isNull);
       expect(session.endedAt, isNull);
-      expect(session.sessionPin, isNull);
       expect(session.meetingLink, isNull);
     });
 
@@ -132,7 +129,9 @@ void main() {
       expect(session.endedAt, isNull);
       expect(session.meetingLink, isNull);
       // A null in one optional field does not take the rest of the record with it.
-      expect(session.sessionPin, '42');
+      // `duration_minutes` is not one of the fields nulled above, so it proves the
+      // other four were read individually rather than the parse falling over.
+      expect(session.durationMinutes, 60);
     });
 
     test('an empty id is treated as missing, not as an id', () {
