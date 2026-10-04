@@ -304,6 +304,16 @@ async def verify_session_pin(
     if session.status is not SessionStatus.SCHEDULED:
         raise ConflictProblem("This session is not waiting to start.")
 
+    # Serialize attempts on the session row. Without a row lock, concurrent
+    # guesses can all read the same counter and overwrite one another.
+    locked_result = await db.execute(
+        select(Session).where(Session.id == session.id).with_for_update()
+    )
+    session = locked_result.scalar_one()
+
+    if session.status is not SessionStatus.SCHEDULED:
+        raise ConflictProblem("This session is not waiting to start.")
+
     waiting = _pin_lock_remaining(session)
     if waiting:
         raise TooManyRequestsProblem(

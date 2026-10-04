@@ -91,7 +91,7 @@ class _AdminDataTableState<T> extends State<AdminDataTable<T>> {
   }
 
   Widget _records(AdminPage<T> page, bool narrow) {
-    if (page.isEmpty) {
+    if (page.isEmpty && page.total == 0) {
       return const Center(child: Text('No records yet.'));
     }
     final rows = <List<String>>[

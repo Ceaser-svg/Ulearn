@@ -47,12 +47,15 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
       final session = await ref
           .read(adminRepositoryProvider)
           .signIn(_email.text.trim(), _password.text);
+      if (!mounted) return;
       ref.read(sessionProvider.notifier).signedIn(session);
     } on AdminAccessException {
+      if (!mounted) return;
       setState(
         () => _error = 'This account is not provisioned for admin access.',
       );
     } on DioException catch (error) {
+      if (!mounted) return;
       final detail = error.response?.data;
       setState(
         () => _error =
@@ -61,6 +64,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
             : 'Sign-in failed. Check the server and try again.',
       );
     } on FormatException catch (error) {
+      if (!mounted) return;
       setState(() => _error = error.message);
     } finally {
       if (mounted) setState(() => _busy = false);

@@ -140,7 +140,7 @@ void main() {
         isNot(0),
       );
 
-      container.read(sessionProvider.notifier).signOut();
+      await container.read(sessionProvider.notifier).signOut();
 
       await _expectRowCount(
         () => container.read(adminUsersProvider.future),
@@ -175,7 +175,7 @@ void main() {
         isNot(0),
       );
 
-      container.read(sessionProvider.notifier).signOut();
+      await container.read(sessionProvider.notifier).signOut();
 
       await _expectRowCount(
         () => container.read(adminUsersProvider.future),
@@ -206,7 +206,7 @@ void main() {
     test('makes no request for a list that was never read', () async {
       final container = signedInConsole();
 
-      container.read(sessionProvider.notifier).signOut();
+      await container.read(sessionProvider.notifier).signOut();
       await _expectRowCount(
         () => container.read(adminAuditEventsProvider.future),
         'audit events',
@@ -219,7 +219,7 @@ void main() {
     test('drops the session with the credentials', () async {
       final container = signedInConsole();
 
-      container.read(sessionProvider.notifier).signOut();
+      await container.read(sessionProvider.notifier).signOut();
 
       expect(container.read(sessionProvider), isNull);
     });

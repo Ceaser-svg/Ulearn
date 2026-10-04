@@ -40,6 +40,8 @@ jobs:
         working-directory: admin_web
       - run: flutter test
         working-directory: admin_web
+      - run: flutter build web --release
+        working-directory: admin_web
 
   # The web target is a supported deployment surface, but `flutter analyze`
   # does not prove it compiles: web-only imports and `dart:html`/`dart:js`

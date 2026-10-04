@@ -157,9 +157,13 @@ async def review_competency(
         # disagree about what "verified" means. Matching re-checks eligibility
         # separately, so this is the audit trail being right, not the only guard.
         scale = row.course_unit.university.grading_scale
-        minimum_points = (
-            scale.competency_min_points if scale is not None else Decimal("0")
-        )
+        if scale is None:
+            raise ValidationProblem(
+                "This university has no configured competency threshold, "
+                "so the competency cannot be verified.",
+                errors={"status": "grading scale is not configured"},
+            )
+        minimum_points = scale.competency_min_points
         if row.grade.grade_points < minimum_points:
             raise ValidationProblem(
                 "This grade is below the competency threshold for the university, "
@@ -167,8 +171,7 @@ async def review_competency(
                 "tutor to submit a qualifying grade.",
                 errors={
                     "status": (
-                        f"requires {minimum_points} or higher on the "
-                        f"{scale.name if scale is not None else 'university'} scale"
+                        f"requires {minimum_points} or higher on the {scale.name} scale"
                     )
                 },
             )

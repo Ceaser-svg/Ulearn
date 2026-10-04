@@ -239,7 +239,7 @@ void main() {
       );
       await _signIn(client);
 
-      client.signOut();
+      await client.signOut();
       await client.getPage('/v1/admin/users', offset: 0, limit: 50);
 
       expect(reported, 1);

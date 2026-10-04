@@ -71,7 +71,7 @@ class HttpAdminRepository implements AdminRepository {
   );
 
   @override
-  void signOut() => _client.signOut();
+  Future<void> signOut() => _client.signOut();
 
   Future<AdminPage<T>> _page<T>(
     String path,

@@ -85,7 +85,9 @@ class FakeSessionsRepository implements SessionsRepository {
   /// Recorded rather than inferred from the created session, so a test can assert
   /// on the duration the tutor actually typed. The created session echoes it, but
   /// only because this fake set it that way -- which is the thing under suspicion.
-  final List<({String requestId, String courseUnitId, String topic, int durationMinutes})>
+  final List<
+    ({String requestId, String courseUnitId, String topic, int durationMinutes})
+  >
   confirmations = [];
 
   /// Confirms a request the way the API does: refused unless it names a session
@@ -183,7 +185,15 @@ class FakeSessionsRepository implements SessionsRepository {
     // Fails closed the way the API does: a session with no stored pin rejects
     // every candidate, including a blank one.
     if (expected == null || expected.isEmpty || pin.trim() != expected) {
-      _pinFailures[sessionId] = failures + 1;
+      final updatedFailures = failures + 1;
+      _pinFailures[sessionId] = updatedFailures;
+      if (updatedFailures >= maxPinAttempts) {
+        throw ThrottledFailure(
+          'Too many wrong PIN attempts. Try again later.',
+          retryAfter: const Duration(minutes: 15),
+          retryAt: DateTime.now().add(const Duration(minutes: 15)),
+        );
+      }
       throw const ValidationFailure(
         'The session PIN is incorrect.',
         fieldErrors: {'pin': 'incorrect'},

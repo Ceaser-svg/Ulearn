@@ -75,8 +75,10 @@ async def _enter(ctx: dict, pin: str, *, who: str = "student"):
 
 
 async def _wrong(ctx: dict, count: int) -> None:
+    correct = ctx["pin"]
+    candidate = "00" if correct != "00" else "01"
     for _ in range(count):
-        assert (await _enter(ctx, "00")).status_code == 422
+        assert (await _enter(ctx, candidate)).status_code == 422
 
 
 async def _session_row(ctx: dict, db) -> Session:

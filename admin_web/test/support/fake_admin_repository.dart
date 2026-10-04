@@ -112,7 +112,7 @@ class FakeAdminRepository implements AdminRepository {
   }
 
   @override
-  void signOut() => signOutCount++;
+  Future<void> signOut() async => signOutCount++;
 
   void _throwIfListError() {
     final error = listError;

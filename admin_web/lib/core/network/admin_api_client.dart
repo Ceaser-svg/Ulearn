@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:peerpass_admin/core/models/admin_session.dart';
 
@@ -104,10 +106,25 @@ class AdminApiClient {
   /// keeps rendering as signed in while every request it makes is rejected.
   /// Clearing the tokens is not enough, because the data already fetched is
   /// still in memory and still confidential.
-  void signOut() {
+  Future<void> signOut({bool notify = true}) async {
+    final accessToken = _accessToken;
+    final refreshToken = _refreshToken;
     _accessToken = null;
     _refreshToken = null;
-    onSessionExpired?.call();
+    if (notify) onSessionExpired?.call();
+    if (accessToken == null || refreshToken == null) return;
+    try {
+      await _dio.post<void>(
+        '/v1/auth/logout',
+        data: <String, dynamic>{'refresh_token': refreshToken},
+        options: Options(
+          headers: <String, dynamic>{'Authorization': 'Bearer $accessToken'},
+        ),
+      );
+    } on DioException {
+      // Local sign-out already completed. Revocation is best effort because a
+      // network failure must not leave the console presenting a live session.
+    }
   }
 
   Options _authOptions() => Options(
@@ -128,7 +145,12 @@ class AdminApiClient {
       if (error.response?.statusCode != 401 || !await _refresh()) {
         rethrow;
       }
-      return await request();
+      try {
+        return await request();
+      } on DioException {
+        await signOut();
+        rethrow;
+      }
     }
   }
 
@@ -139,7 +161,7 @@ class AdminApiClient {
       // refresh is, and the console has to hear about it: leaving the operator
       // looking signed in with no way to make a request succeed is the state
       // this reporting exists to end.
-      signOut();
+      unawaited(signOut());
       return false;
     }
     final inFlight = _refreshInFlight;
@@ -155,14 +177,14 @@ class AdminApiClient {
         final access = tokens?['access_token'];
         final refresh = tokens?['refresh_token'];
         if (access is! String || refresh is! String) {
-          signOut();
+          unawaited(signOut());
           return false;
         }
         _accessToken = access;
         _refreshToken = refresh;
         return true;
       } on DioException {
-        signOut();
+        unawaited(signOut());
         return false;
       } finally {
         _refreshInFlight = null;

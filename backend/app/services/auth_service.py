@@ -287,10 +287,13 @@ async def register(
         )
 
     email = normalise_email(request.email)
+    # Reserve the expensive operation before starting the hash. The atomic
+    # counter update is the admission decision; charging after the hash lets a
+    # concurrent burst all observe the same pre-hash budget.
+    await _charge_registration(db, client_address, settings)
     password_hash = await hash_password_async(request.password)
 
     if await load_user_by_email(db, email) is not None:
-        await _charge_registration(db, client_address, settings)
         await db.commit()
         raise ConflictProblem("An account already exists for that email address.")
 
@@ -314,8 +317,6 @@ async def register(
     # is earned by declaring a grade and having that competency verified, which
     # is what the provisional-to-verified path is for.
     await set_roles(db, user.id, {UserRole.STUDENT})
-
-    await _charge_registration(db, client_address, settings)
 
     response = await _issue_tokens(db, user)
     await db.commit()

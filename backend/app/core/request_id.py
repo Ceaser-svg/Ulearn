@@ -15,6 +15,7 @@ malformed correlation id is not a reason to fail the request that carried it.
 
 from __future__ import annotations
 
+import logging
 import re
 import uuid
 from contextvars import ContextVar
@@ -45,6 +46,7 @@ _REQUEST_ID_HEADER_BYTES = REQUEST_ID_HEADER.lower().encode("ascii")
 #: the right thing under concurrency -- each request's task sees its own value,
 #: where a module-level attribute would be shared and wrong.
 _request_id: ContextVar[str | None] = ContextVar("request_id", default=None)
+_logger = logging.getLogger(__name__)
 
 #: What an outbound-safe identifier is allowed to contain.
 #:
@@ -122,5 +124,12 @@ class RequestIdMiddleware:
 
         try:
             await self.app(scope, receive, send_with_request_id)
+        except BaseException:
+            # ServerErrorMiddleware logs after this middleware unwinds and has
+            # already lost the context variable. Emit the correlated record
+            # while this request's ID is still installed, then preserve the
+            # original exception for the outer error handler.
+            _logger.exception("Unhandled error in request middleware")
+            raise
         finally:
             _request_id.reset(token)

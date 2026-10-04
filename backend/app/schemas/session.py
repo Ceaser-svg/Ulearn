@@ -243,7 +243,6 @@ class VerifyPinRequest(RequestSchema):
     """
 
     pin: str = Field(
-        min_length=1,
-        max_length=MAX_PIN_LENGTH,
+        pattern=r"^[0-9]{2}$",
         description="The two digits the tutor read out.",
     )

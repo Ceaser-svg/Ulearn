@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:peerpass_admin/core/models/admin_session.dart';
@@ -56,9 +58,9 @@ class SessionController extends Notifier<AdminSession?> {
   /// Every provider holding admin data watches this one, so a null state
   /// discards those rows rather than leaving fetched records in a UI with no
   /// credentials behind it.
-  void signOut() {
+  Future<void> signOut() async {
     state = null;
-    ref.read(adminApiClientProvider).signOut();
+    await ref.read(adminApiClientProvider).signOut(notify: false);
   }
 
   /// Reacts to the console discovering it can no longer authenticate: a
@@ -69,6 +71,6 @@ class SessionController extends Notifier<AdminSession?> {
   /// rather than on a stack of redundant transitions.
   void expired() {
     if (state == null) return;
-    signOut();
+    unawaited(signOut());
   }
 }

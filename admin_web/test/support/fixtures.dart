@@ -21,11 +21,17 @@ AdminUser adminUserFixture({
 /// Builds an audit event for a fake console or a JSON fixture.
 AuditEvent auditEventFixture({
   required String action,
+  String actorId = 'admin-1',
   String targetType = 'user',
+  String? targetPublicId = 'user-1',
+  Map<String, dynamic> context = const <String, dynamic>{},
   String createdAt = '2026-01-02T10:30:00Z',
 }) => AuditEvent(
+  actorId: actorId,
   action: action,
   targetType: targetType,
+  targetPublicId: targetPublicId,
+  context: context,
   createdAt: DateTime.parse(createdAt),
 );
 

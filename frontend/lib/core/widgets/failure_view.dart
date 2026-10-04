@@ -24,8 +24,7 @@ class FailureView extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    if (failure case final ThrottledFailure throttle
-        when throttle.retryAt != null && !throttle.isWaitOver) {
+    if (failure case final ThrottledFailure throttle) {
       return _ThrottledNotice(throttle: throttle, onRetry: onRetry);
     }
 

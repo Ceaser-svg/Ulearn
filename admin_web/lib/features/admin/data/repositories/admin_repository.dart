@@ -48,5 +48,5 @@ abstract class AdminRepository {
   });
 
   /// Ends the session from the console's side, credentials included.
-  void signOut();
+  Future<void> signOut();
 }

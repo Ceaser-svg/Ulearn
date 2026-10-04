@@ -74,7 +74,13 @@ class CompetenciesScreen extends ConsumerWidget {
     required Future<CompetencyReviewOutcome> Function() verify,
     required VoidCallback refresh,
   }) async {
-    final outcome = await verify();
+    CompetencyReviewOutcome outcome;
+    try {
+      outcome = await verify();
+    } on AdminValidationException catch (error) {
+      if (context.mounted) _notify(context, error.message);
+      return;
+    }
     if (!context.mounted) return;
     if (outcome == CompetencyReviewOutcome.failed) {
       _notify(context, 'Could not record the review. Try again.');

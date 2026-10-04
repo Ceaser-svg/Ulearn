@@ -16,10 +16,14 @@ class AuditLogScreen extends ConsumerWidget {
       subtitle: 'Append-only record of privileged administrative actions.',
       page: ref.watch(adminAuditEventsProvider),
       controller: ref.read(adminAuditEventsProvider.notifier),
-      columns: const ['Action', 'Target', 'Created'],
+      columns: const ['Action', 'Actor', 'Target', 'Context', 'Created'],
       row: (event) => [
         event.action,
-        event.targetType,
+        event.actorId,
+        '${event.targetType}: ${event.targetPublicId ?? '—'}',
+        event.context.entries
+            .map((entry) => '${entry.key}=${entry.value}')
+            .join(', '),
         formatDateLabel(event.createdAt),
       ],
     );

@@ -7,6 +7,12 @@ import 'package:peerpass_admin/features/admin/presentation/providers/admin_repos
 /// What a review attempt did, so a screen can report it without knowing why.
 enum CompetencyReviewOutcome { verified, rejected, failed }
 
+class AdminValidationException implements Exception {
+  const AdminValidationException(this.message);
+
+  final String message;
+}
+
 /// Records competency reviews.
 ///
 /// The console's one write, and the one place a button used to call the API
@@ -43,7 +49,16 @@ class CompetencyReviewController {
   }) async {
     try {
       await _repository.reviewCompetency(competency, status, reason: reason);
-    } on DioException {
+    } on DioException catch (error) {
+      if (error.response?.statusCode == 422) {
+        final body = error.response?.data;
+        final detail = body is Map<String, dynamic> ? body['detail'] : null;
+        throw AdminValidationException(
+          detail is String
+              ? detail
+              : 'The competency could not be reviewed with these details.',
+        );
+      }
       return CompetencyReviewOutcome.failed;
     }
     return succeeded;

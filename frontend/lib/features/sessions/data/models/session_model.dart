@@ -111,7 +111,9 @@ class SessionModel {
         courseUnitId == null ||
         topic is! String ||
         statusWire is! String) {
-      throw const FormatException('session response was missing a required field');
+      throw const FormatException(
+        'session response was missing a required field',
+      );
     }
 
     final createdAt = json['created_at'];
@@ -273,7 +275,7 @@ class SessionModel {
           other.startedAt == startedAt &&
           other.endedAt == endedAt &&
           other.durationMinutes == durationMinutes &&
-              other.meetingLink == meetingLink &&
+          other.meetingLink == meetingLink &&
           other.isRated == isRated &&
           other.createdAt == createdAt;
 
@@ -351,13 +353,16 @@ class SessionPinModel {
       throw FormatException('PIN response is missing its session or pin', json);
     }
     final remaining = json['attempts_remaining'];
+    if (remaining is! int) {
+      throw FormatException(
+        'PIN response is missing its attempts remaining count',
+        json,
+      );
+    }
     return SessionPinModel(
       sessionId: sessionId,
       sessionPin: pin,
-      // An unknown count is not an emergency: it only drives an advisory, so
-      // reading it as "some attempts left" keeps the tutor from being told a
-      // number the response did not actually carry.
-      attemptsRemaining: remaining is int ? remaining : 0,
+      attemptsRemaining: remaining,
     );
   }
 
@@ -382,5 +387,6 @@ class SessionPinModel {
   int get hashCode => Object.hash(sessionId, sessionPin, attemptsRemaining);
 
   @override
-  String toString() => 'SessionPinModel($sessionId, attempts: $attemptsRemaining)';
+  String toString() =>
+      'SessionPinModel($sessionId, attempts: $attemptsRemaining)';
 }
