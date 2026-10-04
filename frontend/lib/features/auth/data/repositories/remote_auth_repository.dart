@@ -191,14 +191,26 @@ class RemoteAuthRepository implements AuthRepository {
 
   @override
   Future<void> deleteAccount() async {
-    // Clear the tokens first, for the same reason as [signOut]: the user's intent
-    // is not conditional on the network. If the request below fails, this device
-    // is signed out and the account is still whole, which is a recoverable state
-    // the user can retry from. The alternative -- keeping the session so the retry
-    // is convenient -- leaves the app holding credentials for an account the
-    // user believes they have just erased.
+    // The opposite order to [signOut], and deliberately so. Deletion is
+    // authorised by the access token, so clearing the store first would send the
+    // request with no credential at all: the server would answer 401, and the
+    // one outcome that leaves the user worse off than not tapping the button.
+    // [signOut] can clear first because it reads the refresh token before it
+    // does, and because failing to tell the server is harmless when the token
+    // expires on its own.
+    //
+    // Clearing afterwards is also what makes a failed delete recoverable. The
+    // tokens survive it, so the session is still good and "your account is
+    // unchanged, try again" is a thing the user can act on rather than a
+    // sentence explaining why they have just been signed out.
+    //
+    // Guarded like every other call here, unlike [signOut]. Sign-out genuinely
+    // cannot fail as far as its caller is concerned, but this one reports what
+    // went wrong in a sentence the screen can print; an untranslated
+    // [DioException] would sail past the screen's `on Failure` and leave the
+    // user with no explanation at all.
+    await _guard(auth.deleteAccount);
     await tokenStore.clear();
-    await auth.deleteAccount();
   }
 
   /// Signs in or registers, and persists the tokens before returning the user.
