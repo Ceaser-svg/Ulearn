@@ -102,6 +102,14 @@ class FakeAuthRepository implements AuthRepository {
   Future<List<UniversityOption>> universities() async => universityOptions;
 
   @override
+  Future<String?> universityNameById(String universityId) async {
+    for (final university in universityOptions) {
+      if (university.publicId == universityId) return university.name;
+    }
+    return null;
+  }
+
+  @override
   Future<List<Subject>> faculties({required String universityId}) async =>
       facultyOptions;
 
@@ -110,7 +118,8 @@ class FakeAuthRepository implements AuthRepository {
       courseUnitOptions;
 
   @override
-  Future<List<GradeOption>> grades({String? universityId}) async => gradeOptions;
+  Future<List<GradeOption>> grades({String? universityId}) async =>
+      gradeOptions;
 
   @override
   Future<void> submitCompetency({

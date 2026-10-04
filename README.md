@@ -113,7 +113,8 @@ export CORS_ORIGINS=http://localhost:8080
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 # In another terminal, from frontend/
-flutter run -d chrome --dart-define=API_BASE_URL=http://localhost:8000
+flutter run -d chrome --web-port 8080 \
+  --dart-define=API_BASE_URL=http://localhost:8000
 ```
 
 Use the exact origin shown in the browser address bar. If Flutter chooses a

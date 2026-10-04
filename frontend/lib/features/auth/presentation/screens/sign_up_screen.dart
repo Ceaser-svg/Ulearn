@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:lottie/lottie.dart';
 import 'package:peerpass/app/router.dart';
 import 'package:peerpass/core/constants/app_dimens.dart';
 import 'package:peerpass/core/error/failures.dart';
@@ -10,7 +11,6 @@ import 'package:peerpass/core/widgets/failure_view.dart';
 import 'package:peerpass/features/auth/presentation/providers/auth_providers.dart';
 import 'package:peerpass/features/auth/presentation/widgets/credential_fields.dart';
 import 'package:peerpass/features/auth/presentation/widgets/field_errors.dart';
-import 'package:peerpass/features/auth/presentation/widgets/sign_up_id_card.dart';
 
 /// Where a new student creates an account.
 ///
@@ -88,7 +88,7 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const Center(child: SignUpIdCard()),
+                      const _AuthAnimation(asset: 'assets/lotties/SignUp.json'),
                       const SizedBox(height: AppDimens.xl),
                       Text(
                         'Create your account',
@@ -164,6 +164,36 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                 ),
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AuthAnimation extends StatelessWidget {
+  const _AuthAnimation({required this.asset});
+
+  final String asset;
+
+  @override
+  Widget build(BuildContext context) {
+    final reducedMotion =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(
+          maxWidth: AppDimens.signUpAnimationMaxWidth,
+          maxHeight: AppDimens.signUpAnimationMaxHeight,
+        ),
+        child: AspectRatio(
+          aspectRatio: 1934 / 1562,
+          child: Lottie.asset(
+            asset,
+            animate: !reducedMotion,
+            repeat: true,
+            fit: BoxFit.contain,
           ),
         ),
       ),

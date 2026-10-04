@@ -42,8 +42,15 @@ rebuilding rather than flipping a setting at runtime.
 `localhost` inside the emulator is the emulator itself, which is the single most
 common cause of a client that works on web and cannot reach a local API on
 Android. For a physical device, pass your machine's LAN address explicitly.
-For a browser demo against a local backend, configure `CORS_ORIGINS` for the
-demo origin (for example `http://localhost:xxxxx`).
+For a browser demo against a local backend, use a fixed web port and configure
+`CORS_ORIGINS` for that exact origin:
+
+```bash
+flutter run -d chrome --web-port 8080 \
+  --dart-define=API_BASE_URL=http://localhost:8000
+```
+
+The backend must be started with `CORS_ORIGINS=http://localhost:8080`.
 
 Secrets are never compiled into the client. The API holds no secrets; the
 access and refresh tokens are held in `flutter_secure_storage`.

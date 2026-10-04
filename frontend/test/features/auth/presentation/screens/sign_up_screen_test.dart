@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lottie/lottie.dart';
 import 'package:peerpass/core/error/failures.dart';
 import 'package:peerpass/core/models/user_profile.dart';
 import 'package:peerpass/core/models/user_role.dart';
@@ -84,8 +85,10 @@ Future<void> _settle(WidgetTester tester) async {
 /// `app_shell_test.dart` already covers.
 Future<ProviderContainer> _pumpSignUp(
   WidgetTester tester,
-  AuthRepository repository,
-) async {
+  AuthRepository repository, {
+  bool disableAnimations = true,
+  bool settle = true,
+}) async {
   final container = ProviderContainer(
     overrides: [authRepositoryProvider.overrideWithValue(repository)],
   );
@@ -94,10 +97,16 @@ Future<ProviderContainer> _pumpSignUp(
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
-      child: MaterialApp(theme: AppTheme.light, home: const SignUpScreen()),
+      child: MaterialApp(
+        theme: AppTheme.light,
+        home: MediaQuery(
+          data: MediaQueryData(disableAnimations: disableAnimations),
+          child: const SignUpScreen(),
+        ),
+      ),
     ),
   );
-  await _settle(tester);
+  if (settle) await _settle(tester);
   return container;
 }
 
@@ -110,6 +119,29 @@ Future<void> _enterValidForm(WidgetTester tester) async {
 }
 
 void main() {
+  testWidgets('renders the supplied looping sign-up animation', (tester) async {
+    await _pumpSignUp(
+      tester,
+      _CountingAuthRepository(),
+      disableAnimations: false,
+      settle: false,
+    );
+    await tester.pump();
+
+    final animation = tester.widget<Lottie>(find.byType(Lottie));
+    expect(animation.repeat, isTrue);
+    expect(animation.animate, isTrue);
+  });
+
+  testWidgets('disables sign-up animation when reduced motion is enabled', (
+    tester,
+  ) async {
+    await _pumpSignUp(tester, _CountingAuthRepository());
+
+    final animation = tester.widget<Lottie>(find.byType(Lottie));
+    expect(animation.animate, isFalse);
+  });
+
   testWidgets('a password shorter than the API requires is refused', (
     tester,
   ) async {
