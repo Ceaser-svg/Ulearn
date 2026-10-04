@@ -1,3 +1,4 @@
+import 'package:clock/clock.dart';
 import 'package:flutter/foundation.dart';
 
 /// Transport-independent representation of an error.
@@ -92,6 +93,54 @@ final class ConflictFailure extends Failure {
 /// The server failed to handle an otherwise valid request.
 final class ServerFailure extends Failure {
   const ServerFailure([super.message = 'Something went wrong on our end.']);
+}
+
+/// The caller is being rate limited: too many attempts, too soon.
+///
+/// Its own type rather than a [ServerFailure] or [ConflictFailure] because it is
+/// the one failure where retrying *now* is guaranteed to fail again, and the one
+/// where the caller has been told how long to wait. That makes it the only
+/// failure with a scheduled remedy, and the presentation layer needs to be able
+/// to act on the wait rather than on the wording.
+///
+/// A lockout must never be reported as an authentication problem: a client that
+/// treats 429 as 401 signs the student out and loses the sign-in form they were
+/// standing on. A distinct type makes that collapse a compile error.
+@immutable
+final class ThrottledFailure extends Failure {
+  const ThrottledFailure(super.message, {this.retryAfter, this.retryAt});
+
+  /// How long the server asked the caller to wait, when it said.
+  ///
+  /// Null when the response carried no usable `Retry-After`, which is legal --
+  /// a proxy can strip the header. The UI then says nothing about timing rather
+  /// than inventing a number the server never promised.
+  final Duration? retryAfter;
+
+  /// The instant the wait ends, captured when the failure was built.
+  ///
+  /// Absolute rather than a duration so a countdown can recompute against the
+  /// clock without being told twice how long the wait was, and so a widget that
+  /// rebuilds does not restart the wait. Null when the server said nothing
+  /// usable, in which case there is nothing to count down.
+  final DateTime? retryAt;
+
+  /// Whether trying again now could plausibly succeed.
+  bool get isWaitOver {
+    final at = retryAt;
+    return at == null || !clock.now().isBefore(at);
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ThrottledFailure &&
+          other.message == message &&
+          other.retryAfter == retryAfter &&
+          other.retryAt == retryAt;
+
+  @override
+  int get hashCode => Object.hash(message, retryAfter, retryAt);
 }
 
 /// A request was cancelled before it completed, usually by navigation.

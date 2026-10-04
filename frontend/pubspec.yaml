@@ -13,6 +13,11 @@ environment:
   flutter: '>=3.47.0'
 
 dependencies:
+  # Time source, so the rate-limit countdown reads the clock Flutter's test
+  # binding controls. `DateTime.now()` bypasses it and leaves the countdown
+  # untestable, because `pump` advances timers but not the wall clock.
+  clock: ^1.1.2
+
   cupertino_icons: ^1.0.8
 
   # HTTP client. Chosen over `package:http` for interceptors, which is how the

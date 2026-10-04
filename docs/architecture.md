@@ -98,6 +98,39 @@ Shared layers:
 - Riverpod for state management
 - Core theme, constants, and reusable widgets
 
+#### A lockout is its own failure, not a server error
+
+`429` maps to `ThrottledFailure`, never to `ServerFailure`, `AuthFailure`, or the
+`UnknownFailure` it used to fall through to. Two consequences are load-bearing:
+
+**A lockout must never read as an auth problem.** A client that treats `429` as
+`401` signs the student out and throws away the sign-in form they were standing
+on — the opposite of what a rate limit should do, and destructive rather than
+merely wrong. `ThrottledFailure` is a separate variant in a `sealed` hierarchy,
+so a `switch` that treats it as an auth problem does not compile.
+
+**The UI waits, and says so.** `FailureView` counts the wait down and withholds
+the retry button until it elapses. A retry offered during a lockout invites a
+student to spend their remaining budget rediscovering the refusal — and on the
+sign-in path every attempt in the window is another Argon2 hash the server
+discards, so the button that looks harmless is the one thing that makes a
+lockout worse.
+
+The wait is read from the `Retry-After` header first, falling back to
+`errors.retry_after_seconds`, because a proxy can strip the header while passing
+the body through untouched. Both HTTP forms are accepted (delta-seconds and
+HTTP-date), the value is clamped, and when neither is usable the client says
+nothing about timing rather than inventing a number the server never promised.
+
+The client's message replaces the API's `"Try again shortly"` once a real wait is
+known, since that wording is true and useless to someone told to wait fifteen
+minutes. This is the one status where the client's wording wins over the API's.
+
+The countdown reads `clock.now()` rather than `DateTime.now()`. `pump` advances
+timers but not the wall clock, so a wall-clock countdown cannot be tested; the
+Flutter test binding substitutes a controllable clock for `clock` while leaving
+real time alone in a live binding.
+
 #### Session state lives in `core/`, not in `auth`
 
 `frontend/lib/core/state/session.dart` holds the one source of truth for who is
