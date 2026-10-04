@@ -18,6 +18,7 @@ from app.api.router import api_router
 from app.core.config import get_settings
 from app.core.database import get_session_factory
 from app.core.exceptions import ProblemException
+from app.core.logging import install_log_redaction
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,10 @@ def create_app() -> FastAPI:
     with its own settings and its own database.
     """
     settings = get_settings()
+
+    # Before the first route can fail, not after: the point of this is that the
+    # catch-all handler below never has a credential to log.
+    install_log_redaction()
 
     application = FastAPI(
         title="PeerPass API",

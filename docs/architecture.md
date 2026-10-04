@@ -1012,6 +1012,9 @@ true. A refresh that is *refused* does clear the token and routes to sign-in.
 - Unhandled server errors log the path and a fixed client-facing message.
   Interpolating an unexpected exception's message is how connection strings and
   row contents end up in a student's error toast.
+- Every record that leaves the process is redacted of credential-shaped values
+  before it reaches a handler, including the rendered traceback, because a
+  database error carries the parameters of the statement that failed. See §9.9.
 
 ### 9.7 Data protection
 
@@ -1034,7 +1037,46 @@ of the rebuild.
 from it — reformatting generated files produces churn that hides the real changes
 on the next autogenerate run.
 
-### 9.9 Not yet in place
+### 9.9 Redaction at the logging boundary
+
+SQLAlchemy puts the bound parameters of a failed statement into the text of the
+exception it raises. That text is normally swallowed — `register()` catches the
+`IntegrityError` from a duplicate address and answers `409` — but that guard is
+specific to one exception type. A `DataError` from a mis-sized column, an
+`OperationalError` from a deadlock, anything else that escapes the flush reaches
+the catch-all handler, which logs the traceback. The traceback carries the INSERT
+that creates an account, so it carries the student's Argon2 hash and email
+address in cleartext. This was reproduced against PostgreSQL before the control
+existed, not assumed.
+
+So redaction happens where log records are formatted, not at each throw site.
+`backend/app/core/logging.py` installs a filter on the root logger and its
+handlers, which removes credential-shaped values from the message, the arguments
+and the rendered traceback: named parameters such as `password_hash`, bare
+password hashes in any encoding this service or its history uses (Argon2,
+PBKDF2, bcrypt, scrypt), JWTs, and the password in a database URL.
+
+Two deliberate choices:
+
+- **A filter, not a formatter.** A formatter attached at import time is discarded
+  when uvicorn installs its own logging configuration at startup, which it always
+  does. A filter on the logger survives that.
+- **The stack survives.** The filter pre-computes `exc_text` redacted, so the real
+  formatter appends that instead of re-rendering the original. An operator keeps
+  the frames, the failing statement and the constraint name — the hash goes.
+
+It is a pattern matcher, not a parser. Anything clever enough to know whether a
+given key is secret in a given statement is also wrong the first time a statement
+is built by a library rather than by us. Over-redacting costs a debugging
+session; under-redacting costs the credential.
+
+This is a floor, not a substitute for the controls it complements. Statements are
+still logged with their parameters when `database_echo` is set, which is refused
+outside `development` for exactly this reason (§9.6), and the SQLAlchemy log
+namespace is not covered when a deployment attaches its own handler before the
+application starts.
+
+### 9.10 Not yet in place
 
 Stated explicitly so nothing here is mistaken for a control that exists:
 
@@ -1046,6 +1088,10 @@ Stated explicitly so nothing here is mistaken for a control that exists:
   browser origins are untrusted until deliberately configured.
 - **No structured audit log** of access to academic records. Required before any
   institutional pilot.
+- **Log records carry no request id.** An operator correlating one student's
+  report across a proxy log, the application log and a database log has nothing
+  to join on. Needs a correlation id propagated from the edge, plus structured
+  output, before an institutional pilot.
 
 ---
 
