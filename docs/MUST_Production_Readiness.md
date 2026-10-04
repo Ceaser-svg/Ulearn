@@ -45,10 +45,14 @@ close that specific gap.
 
 An intermittent full-suite failure was observed once historically, at roughly
 one in fifteen runs, after a genuinely flaky concurrent test had already been
-replaced with deterministic coverage. No traceback was captured, and it has not
-been reproduced since. It is recorded as **unexplained, not resolved**: a
-reproduction is the only thing that would close it, and until then the default
-suite is treated as trustworthy but not proven stable.
+replaced with deterministic coverage. No traceback was captured. A dedicated
+hunt then ran the full suite **25 consecutive times** against PostgreSQL, the
+last 21 of them on the current tree (543 tests each), and reproduced nothing.
+It is recorded as **unexplained, not resolved**: the failure is rare enough that
+25 clean runs cannot rule it out, and a reproduction is the only thing that
+would close it. The default suite is treated as trustworthy but not proven
+stable, and any future failure should be captured with a full traceback rather
+than retried away.
 
 ## Required staging evidence
 
