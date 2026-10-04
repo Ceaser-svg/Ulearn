@@ -101,6 +101,15 @@ Every 429 carries the wait in two places, on purpose:
 Send one without the other and either the spec or the app is wrong, and both kinds
 of consumer exist.
 
+### `X-Request-ID`
+
+Every response carries one. Send your own and it is echoed back when it is a
+plain token (letters, digits, `.`, `_`, `~`, `-`, up to 200 characters); anything
+else is replaced with a generated id, because the value reaches log text and a
+newline in it would be an injection primitive. The same value is attached to
+every log record for the request, including a 500, so quoting it in a bug report
+lets an operator find the exact request. Treat it as opaque.
+
 ### Status codes
 
 | Status | `code`                  | When                                                        |
