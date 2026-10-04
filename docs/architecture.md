@@ -1109,7 +1109,28 @@ outside `development` for exactly this reason (§9.6), and the SQLAlchemy log
 namespace is not covered when a deployment attaches its own handler before the
 application starts.
 
-### 9.10 Not yet in place
+### 9.10 Request correlation
+
+Every request carries one identifier, echoed in the `X-Request-ID` response
+header and attached to every log record emitted while it is handled. An operator
+with a student's report and a proxy log can name one request and read its lines
+together, which is what `backend/app/core/request_id.py` exists for.
+
+An inbound id is untrusted: it is echoed into a response header and into log
+text, so a newline or a `%s` in it is an injection primitive. It is validated to a
+conservative charset and length and replaced with a generated id when it does not
+fit — replaced, not rejected, because a malformed correlation id is not a reason
+to fail the request that carried it. The id reaches log records through a filter
+that defaults to `-` outside any request, so a startup line still formats.
+
+A pure-ASGI middleware sets it, not `BaseHTTPMiddleware`. The higher-level class
+runs the inner app in a separate task, and a context variable set across that
+boundary is not the one the request's own logs read. The unhandled-exception
+handler runs outside the middleware, so it echoes the id from `request.state`
+rather than relying on the middleware's send wrapper; a 500 is the response that
+needs correlation most.
+
+### 9.11 Not yet in place
 
 Stated explicitly so nothing here is mistaken for a control that exists:
 
@@ -1120,11 +1141,8 @@ Stated explicitly so nothing here is mistaken for a control that exists:
 - **CORS defaults to empty**, which is correct for a mobile client and means
   browser origins are untrusted until deliberately configured.
 - **No structured audit log** of access to academic records. Required before any
-  institutional pilot.
-- **Log records carry no request id.** An operator correlating one student's
-  report across a proxy log, the application log and a database log has nothing
-  to join on. Needs a correlation id propagated from the edge, plus structured
-  output, before an institutional pilot.
+  institutional pilot. Log lines are correlated by request id (§9.10) but are not
+  yet emitted as structured JSON.
 
 ---
 

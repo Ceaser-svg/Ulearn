@@ -19,6 +19,7 @@ from app.core.config import get_settings
 from app.core.database import get_session_factory
 from app.core.exceptions import ProblemException
 from app.core.logging import install_log_redaction
+from app.core.request_id import REQUEST_ID_HEADER, RequestIdMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,10 @@ def create_app() -> FastAPI:
     _register_exception_handlers(application)
     application.include_router(api_router)
 
+    # Added after every other middleware so it is the outermost of them, and so
+    # its id is already in the scope before CORS and the router run.
+    application.add_middleware(RequestIdMiddleware)
+
     @application.get("/health", tags=["system"])
     def health_check() -> dict[str, str]:
         """Report service availability.
@@ -111,6 +116,19 @@ def create_app() -> FastAPI:
     return application
 
 
+def _request_id_headers(request: Request) -> dict[str, str]:
+    """Echo the request id on a response that may bypass the middleware.
+
+    Normal responses get the header from [RequestIdMiddleware]. The unhandled
+    exception handler runs inside Starlette's `ServerErrorMiddleware`, which sits
+    outside every user middleware, so its response never passes through that send
+    wrapper and has to carry the id itself. Returning the same header from every
+    handler keeps a 500 correlatable, which is the error that needs it most.
+    """
+    request_id = getattr(request.state, "request_id", None)
+    return {REQUEST_ID_HEADER: request_id} if request_id else {}
+
+
 def _register_exception_handlers(application: FastAPI) -> None:
     @application.exception_handler(ProblemException)
     async def _handle_problem(request: Request, exc: ProblemException) -> JSONResponse:
@@ -120,8 +138,8 @@ def _register_exception_handlers(application: FastAPI) -> None:
             media_type=PROBLEM_CONTENT_TYPE,
             # Problem exceptions can require headers of their own -- a 429's
             # `Retry-After`. `ProblemException.headers` is empty by default, so
-            # this is a no-op for every error that does not need one.
-            headers=exc.headers or None,
+            # the request id is often the only header here.
+            headers={**(exc.headers or {}), **_request_id_headers(request)},
         )
 
     @application.exception_handler(RequestValidationError)
@@ -150,6 +168,7 @@ def _register_exception_handlers(application: FastAPI) -> None:
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content=problem.to_problem(instance=str(request.url.path)),
             media_type=PROBLEM_CONTENT_TYPE,
+            headers=_request_id_headers(request),
         )
 
     @application.exception_handler(StarletteHTTPException)
@@ -169,7 +188,10 @@ def _register_exception_handlers(application: FastAPI) -> None:
             status_code=exc.status_code,
             content=problem.to_problem(instance=str(request.url.path)),
             media_type=PROBLEM_CONTENT_TYPE,
-            headers=getattr(exc, "headers", None),
+            headers={
+                **(getattr(exc, "headers", None) or {}),
+                **_request_id_headers(request),
+            },
         )
 
     @application.exception_handler(Exception)
@@ -191,6 +213,7 @@ def _register_exception_handlers(application: FastAPI) -> None:
             status_code=500,
             content=problem.to_problem(instance=str(request.url.path)),
             media_type=PROBLEM_CONTENT_TYPE,
+            headers=_request_id_headers(request),
         )
 
 

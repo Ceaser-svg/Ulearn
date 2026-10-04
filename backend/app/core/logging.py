@@ -28,6 +28,13 @@ filter is that the one place nobody remembered is the one that leaks.
 import logging
 import re
 
+from app.core.request_id import current_request_id
+
+#: The record layout shared by every handler this module configures. The request
+#: id sits near the front because its job is to let an operator group lines, and
+#: grouping is a scan of the left edge.
+LOG_FORMAT = "%(levelname)s [%(request_id)s] %(name)s %(message)s"
+
 #: The parameter names whose values must never be logged. Matched as whole words
 #: inside a quoted key, so `password_hash` is caught by `password` and not by
 #: something like `password_policy_id`.
@@ -140,6 +147,21 @@ class RedactingFormatter(logging.Formatter):
         return redact(super().format(record))
 
 
+class RequestIdFilter(logging.Filter):
+    """Attach the id of the request being handled to every record.
+
+    The default `-` is not cosmetic. The format string renders `%(request_id)s`
+    unconditionally, and a record emitted outside any request -- at startup, from
+    a CLI, from a background task -- has no id. Without the default, formatting
+    that record raises and the log line is lost, which turns an observability
+    feature into an outage.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = current_request_id() or "-"
+        return True
+
+
 def install_log_redaction() -> None:
     """Route every handler's output through redaction.
 
@@ -150,6 +172,8 @@ def install_log_redaction() -> None:
     root = logging.getLogger()
     if not any(isinstance(f, RedactingFilter) for f in root.filters):
         root.addFilter(RedactingFilter())
+    if not any(isinstance(f, RequestIdFilter) for f in root.filters):
+        root.addFilter(RequestIdFilter())
 
     if not root.handlers:
         # No handler of our own yet -- uvicorn installs its configuration after
@@ -160,7 +184,9 @@ def install_log_redaction() -> None:
     for handler in root.handlers:
         if not any(isinstance(f, RedactingFilter) for f in handler.filters):
             handler.addFilter(RedactingFilter())
+        if not any(isinstance(f, RequestIdFilter) for f in handler.filters):
+            handler.addFilter(RequestIdFilter())
         if not isinstance(handler.formatter, RedactingFormatter):
             handler.setFormatter(
-                RedactingFormatter("%(levelname)s %(name)s %(message)s")
+                RedactingFormatter(LOG_FORMAT, defaults={"request_id": "-"})
             )
