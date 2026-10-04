@@ -120,8 +120,13 @@ class RemoteAuthRepository implements AuthRepository {
       _guard(() => academics.faculties(universityId: universityId));
 
   @override
-  Future<List<CourseUnitOption>> courseUnits({String? universityId}) =>
-      _guard(() => academics.courseUnits(universityId: universityId));
+  Future<List<CourseUnitOption>> courseUnits({
+    String? universityId,
+    String? subjectId,
+  }) => _guard(
+    () =>
+        academics.courseUnits(universityId: universityId, subjectId: subjectId),
+  );
 
   @override
   Future<List<GradeOption>> grades({String? universityId}) =>

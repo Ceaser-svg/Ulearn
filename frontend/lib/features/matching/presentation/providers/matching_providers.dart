@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart';
 import 'package:peerpass/core/error/failures.dart';
 import 'package:peerpass/core/models/course_unit.dart';
+import 'package:peerpass/core/state/session.dart';
 import 'package:peerpass/features/matching/data/models/help_request.dart';
 import 'package:peerpass/features/matching/data/models/match_result.dart';
 import 'package:peerpass/features/matching/data/repositories/matching_repository.dart';
@@ -26,10 +27,15 @@ typedef MatchQuery = ({String courseUnitId, bool widenToSubject});
 /// let one feature reach another through that feature's repository contract, and
 /// a shared catalogue would need a home in `core/` that has no reason to know
 /// what a course unit is.
-final courseUnitOptionsProvider = FutureProvider<List<CourseUnit>>(
-  (ref) => ref.watch(matchingRepositoryProvider).courseUnits(),
-  retry: (retryCount, error) => null,
-);
+final courseUnitOptionsProvider = FutureProvider<List<CourseUnit>>((ref) {
+  final profile = ref.watch(sessionControllerProvider).profile;
+  return ref
+      .watch(matchingRepositoryProvider)
+      .courseUnits(
+        universityId: profile?.universityId,
+        subjectId: profile?.facultyId,
+      );
+}, retry: (retryCount, error) => null);
 
 /// The tutors the API will propose for one query.
 ///

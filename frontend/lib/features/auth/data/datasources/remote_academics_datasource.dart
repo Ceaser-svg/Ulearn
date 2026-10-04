@@ -51,10 +51,16 @@ class RemoteAcademicsDatasource {
   ///
   /// Filtered by university so a student only sees units from their own
   /// institution. The API accepts an optional `university_id` query param.
-  Future<List<CourseUnitOption>> courseUnits({String? universityId}) async {
+  Future<List<CourseUnitOption>> courseUnits({
+    String? universityId,
+    String? subjectId,
+  }) async {
     final response = await _dio.get<List<dynamic>>(
       '/v1/academics/course-units',
-      queryParameters: {'university_id': universityId},
+      queryParameters: {
+        'university_id': ?universityId,
+        'subject_id': ?subjectId,
+      },
     );
     return [
       for (final row in response.data!)

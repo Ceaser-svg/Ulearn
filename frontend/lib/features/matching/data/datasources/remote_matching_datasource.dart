@@ -28,10 +28,16 @@ class RemoteMatchingDatasource {
   /// need a home outside `features/` -- and `core/` is not where an HTTP call
   /// about course units belongs. The same endpoint is called twice in the app's
   /// life, once per flow, and the duplication is the cheaper of the two.
-  Future<List<CourseUnit>> courseUnits({String? universityId}) async {
+  Future<List<CourseUnit>> courseUnits({
+    String? universityId,
+    String? subjectId,
+  }) async {
     final response = await _dio.get<List<dynamic>>(
       '/v1/academics/course-units',
-      queryParameters: {'university_id': ?universityId},
+      queryParameters: {
+        'university_id': ?universityId,
+        'subject_id': ?subjectId,
+      },
     );
     return [
       for (final row in response.data ?? const <dynamic>[])

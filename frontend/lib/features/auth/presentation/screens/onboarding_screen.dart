@@ -527,10 +527,11 @@ class _PrimaryModulesStep extends ConsumerWidget {
     final theme = Theme.of(context);
     final state = ref.watch(onboardingControllerProvider);
     final universityId = state.universityId;
+    final facultyId = state.facultyId;
 
-    if (universityId == null) {
+    if (universityId == null || facultyId == null) {
       return Text(
-        'Choose a university first.',
+        'Choose a university and faculty first.',
         style: theme.textTheme.bodyMedium?.copyWith(
           color: theme.colorScheme.error,
         ),
@@ -553,7 +554,12 @@ class _PrimaryModulesStep extends ConsumerWidget {
         ),
         const SizedBox(height: AppDimens.xl),
         ref
-            .watch(courseUnitsProvider(universityId))
+            .watch(
+              courseUnitsProvider((
+                universityId: universityId,
+                subjectId: facultyId,
+              )),
+            )
             .when(
               loading: () => const Center(child: CircularProgressIndicator()),
               error: (error, stackTrace) => Text(

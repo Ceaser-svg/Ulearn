@@ -35,7 +35,9 @@ class _BecomeTutorScreenState extends ConsumerState<BecomeTutorScreen> {
   Widget build(BuildContext context) {
     final profile = ref.watch(sessionControllerProvider).profile;
     final universityId = profile?.universityId ?? '';
-    final courseUnitsAsync = ref.watch(courseUnitsProvider(universityId));
+    final facultyId = profile?.facultyId;
+    final courseUnitScope = (universityId: universityId, subjectId: facultyId);
+    final courseUnitsAsync = ref.watch(courseUnitsProvider(courseUnitScope));
     final gradesAsync = ref.watch(gradesProvider(universityId));
     final universitiesAsync = ref.watch(universitiesProvider);
 
@@ -70,6 +72,8 @@ class _BecomeTutorScreenState extends ConsumerState<BecomeTutorScreen> {
         !_submitting &&
         profile != null &&
         profile.universityId != null &&
+        profile.facultyId != null &&
+        courseUnits.any((unit) => unit.publicId == _courseUnitId) &&
         _courseUnitId != null &&
         _gradeId != null;
 
@@ -79,11 +83,11 @@ class _BecomeTutorScreenState extends ConsumerState<BecomeTutorScreen> {
         child: RefreshIndicator(
           onRefresh: () async {
             ref
-              ..invalidate(courseUnitsProvider(universityId))
+              ..invalidate(courseUnitsProvider(courseUnitScope))
               ..invalidate(gradesProvider(universityId))
               ..invalidate(universitiesProvider);
             await Future.wait([
-              ref.read(courseUnitsProvider(universityId).future),
+              ref.read(courseUnitsProvider(courseUnitScope).future),
               ref.read(gradesProvider(universityId).future),
             ]);
           },
@@ -116,10 +120,11 @@ class _BecomeTutorScreenState extends ConsumerState<BecomeTutorScreen> {
                   _buildDropdown<String>(
                     label: 'Course unit',
                     value:
-                        _courseUnitId ??
-                        (courseUnits.isEmpty
-                            ? null
-                            : courseUnits.first.publicId),
+                        courseUnits.any(
+                          (unit) => unit.publicId == _courseUnitId,
+                        )
+                        ? _courseUnitId
+                        : null,
                     items: [
                       for (final unit in courseUnits)
                         DropdownMenuItem(
