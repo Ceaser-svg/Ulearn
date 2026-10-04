@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:peerpass/core/constants/app_dimens.dart';
 import 'package:peerpass/core/error/failures.dart';
+import 'package:peerpass/core/state/session.dart';
 import 'package:peerpass/core/widgets/content_width_limiter.dart';
 import 'package:peerpass/features/home/presentation/providers/delete_account_controller.dart';
 
@@ -11,9 +12,8 @@ import 'package:peerpass/features/home/presentation/providers/delete_account_con
 /// undone, and putting it two taps from the landing screen would make a mis-tap
 /// permanent. A student who wants it should have to have meant it.
 ///
-/// The confirmation asks the user to type the word, which is the only friction
-/// that has ever measured as effective at stopping a destructive tap. A yes/no
-/// dialog is dismissed by muscle memory.
+/// The confirmation asks the user to re-enter the account email. This makes the
+/// irreversible action explicit while remaining usable for every account.
 class DeleteAccountTile extends ConsumerStatefulWidget {
   const DeleteAccountTile({super.key});
 
@@ -32,12 +32,11 @@ class _DeleteAccountTileState extends ConsumerState<DeleteAccountTile> {
   /// did not happen.
   String? _problem;
 
-  static const String _confirmationWord = 'DELETE';
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final busy = _busy;
+    final email = ref.watch(sessionControllerProvider).profile?.email;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -48,7 +47,7 @@ class _DeleteAccountTileState extends ConsumerState<DeleteAccountTile> {
           style: OutlinedButton.styleFrom(
             foregroundColor: theme.colorScheme.error,
           ),
-          onPressed: busy ? null : _confirm,
+          onPressed: busy || email == null ? null : () => _confirm(email),
           icon: busy
               ? const SizedBox(
                   height: AppDimens.sm,
@@ -73,11 +72,10 @@ class _DeleteAccountTileState extends ConsumerState<DeleteAccountTile> {
     );
   }
 
-  Future<void> _confirm() async {
+  Future<void> _confirm(String email) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) =>
-          const _DeleteAccountDialog(word: _confirmationWord),
+      builder: (dialogContext) => _DeleteAccountDialog(email: email),
     );
     if (confirmed != true || !mounted) return;
 
@@ -123,11 +121,11 @@ class _DeleteAccountTileState extends ConsumerState<DeleteAccountTile> {
   }
 }
 
-/// The type-to-confirm gate.
+/// The email-to-confirm gate.
 class _DeleteAccountDialog extends StatefulWidget {
-  const _DeleteAccountDialog({required this.word});
+  const _DeleteAccountDialog({required this.email});
 
-  final String word;
+  final String email;
 
   @override
   State<_DeleteAccountDialog> createState() => _DeleteAccountDialogState();
@@ -144,7 +142,8 @@ class _DeleteAccountDialogState extends State<_DeleteAccountDialog> {
     // confirmation. Watching the controller rather than validating on submit
     // means the user can see the button come alive as they finish the word.
     _typed.addListener(() {
-      final matches = _typed.text.trim() == widget.word;
+      final matches =
+          _typed.text.trim().toLowerCase() == widget.email.toLowerCase();
       if (matches != _matches) setState(() => _matches = matches);
     });
   }
@@ -173,15 +172,17 @@ class _DeleteAccountDialogState extends State<_DeleteAccountDialog> {
               style: theme.textTheme.bodyMedium,
             ),
             const SizedBox(height: AppDimens.md),
-            Text('Type ${widget.word} to confirm.', style: theme.textTheme.bodySmall),
+            Text(
+              'Type your email address to confirm: ${widget.email}',
+              style: theme.textTheme.bodySmall,
+            ),
             const SizedBox(height: AppDimens.sm),
             TextField(
               controller: _typed,
               autofocus: true,
               autocorrect: false,
               enableSuggestions: false,
-              textCapitalization: TextCapitalization.characters,
-              decoration: InputDecoration(labelText: widget.word),
+              decoration: const InputDecoration(labelText: 'Email address'),
             ),
           ],
         ),

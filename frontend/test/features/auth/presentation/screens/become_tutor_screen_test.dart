@@ -16,6 +16,7 @@ const UserProfile _student = UserProfile(
   email: 'student@must.ac.ug',
   roles: <UserRole>{UserRole.student},
   universityId: 'university-1',
+  facultyId: 'faculty-1',
   fullName: 'Amina Nansubuga',
 );
 

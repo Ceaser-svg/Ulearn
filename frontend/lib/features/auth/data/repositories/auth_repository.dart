@@ -50,7 +50,10 @@ abstract interface class AuthRepository {
   Future<List<Subject>> faculties({required String universityId});
 
   /// Course units for the given university, for the primary modules step.
-  Future<List<CourseUnitOption>> courseUnits({String? universityId});
+  Future<List<CourseUnitOption>> courseUnits({
+    String? universityId,
+    String? subjectId,
+  });
 
   /// Every grade on the university's published scale.
   Future<List<GradeOption>> grades({String? universityId});

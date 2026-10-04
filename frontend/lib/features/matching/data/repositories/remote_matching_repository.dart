@@ -19,8 +19,12 @@ class RemoteMatchingRepository implements MatchingRepository {
   final RemoteMatchingDatasource _remote;
 
   @override
-  Future<List<CourseUnit>> courseUnits({String? universityId}) =>
-      _guard(() => _remote.courseUnits(universityId: universityId));
+  Future<List<CourseUnit>> courseUnits({
+    String? universityId,
+    String? subjectId,
+  }) => _guard(
+    () => _remote.courseUnits(universityId: universityId, subjectId: subjectId),
+  );
 
   @override
   Future<MatchResult> suggestions({

@@ -98,6 +98,7 @@ class OnboardingState {
     bool? saving,
     Failure? failure,
     bool clearFaculty = false,
+    bool clearPrimaryModules = false,
     bool clearFailure = false,
   }) {
     return OnboardingState(
@@ -111,7 +112,9 @@ class OnboardingState {
       yearOfStudy: yearOfStudy ?? this.yearOfStudy,
       academicDataConsented:
           academicDataConsented ?? this.academicDataConsented,
-      primaryModuleIds: primaryModuleIds ?? this.primaryModuleIds,
+      primaryModuleIds: clearPrimaryModules
+          ? const []
+          : (primaryModuleIds ?? this.primaryModuleIds),
       saving: saving ?? this.saving,
       // An explicit clear, for the same reason `clearFaculty` exists: a save that
       // starts must not leave the previous save's complaint on screen.
@@ -179,12 +182,17 @@ class OnboardingController extends Notifier<OnboardingState> {
     // belonged to the old one is dropped rather than left to be submitted with
     // the new.
     final changed = publicId != state.universityId;
-    state = state.copyWith(universityId: publicId, clearFaculty: changed);
+    state = state.copyWith(
+      universityId: publicId,
+      clearFaculty: changed,
+      clearPrimaryModules: changed,
+    );
   }
 
   void setFaculty(String? publicId) {
     if (publicId == null) return;
-    state = state.copyWith(facultyId: publicId);
+    final changed = publicId != state.facultyId;
+    state = state.copyWith(facultyId: publicId, clearPrimaryModules: changed);
   }
 
   void setYearOfStudy(int? year) => state = state.copyWith(yearOfStudy: year);

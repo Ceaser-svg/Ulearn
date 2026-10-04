@@ -162,17 +162,25 @@ final facultiesProvider = FutureProvider.family<List<Subject>, String>((
   }
 });
 
-/// Course units scoped to the selected university.
+typedef CourseUnitScope = ({String universityId, String? subjectId});
+
+/// Course units scoped to the selected university and, when known, faculty.
 // Riverpod infers the family provider type from the generic parameters, and the
 // analyzer does not surface that type in a way it can prove without the
 // explicit ignore.
 // ignore: specify_nonobvious_property_types
 final courseUnitsProvider =
-    FutureProvider.family<List<CourseUnitOption>, String>((ref, universityId) {
-      if (universityId.isEmpty) return Future.value(const []);
+    FutureProvider.family<List<CourseUnitOption>, CourseUnitScope>((
+      ref,
+      scope,
+    ) {
+      if (scope.universityId.isEmpty) return Future.value(const []);
       return ref
           .read(authRepositoryProvider)
-          .courseUnits(universityId: universityId);
+          .courseUnits(
+            universityId: scope.universityId,
+            subjectId: scope.subjectId,
+          );
     });
 
 // The family provider's generic arguments are explicit enough for the API call,

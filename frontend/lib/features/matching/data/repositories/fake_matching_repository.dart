@@ -108,8 +108,10 @@ class FakeMatchingRepository implements MatchingRepository {
   List<CourseUnit> get catalogue => List<CourseUnit>.unmodifiable(_courseUnits);
 
   @override
-  Future<List<CourseUnit>> courseUnits({String? universityId}) async =>
-      List<CourseUnit>.unmodifiable(_courseUnits);
+  Future<List<CourseUnit>> courseUnits({
+    String? universityId,
+    String? subjectId,
+  }) async => List<CourseUnit>.unmodifiable(_courseUnits);
 
   @override
   Future<MatchResult> suggestions({

@@ -28,7 +28,10 @@ typedef _Harness = ({
 });
 
 /// Builds a container holding [profile] as the signed-in account.
-_Harness _harness({UserProfile profile = _student, AuthRepository? repository}) {
+_Harness _harness({
+  UserProfile profile = _student,
+  AuthRepository? repository,
+}) {
   final auth =
       repository ??
       FakeAuthRepository(session: profile, refreshToken: 'refresh');
@@ -87,11 +90,11 @@ Future<void> _pumpTile(WidgetTester tester, _Harness harness) async {
   await tester.pump();
 }
 
-/// Opens the confirmation and types the word, leaving the dialog open.
+/// Opens the confirmation and types the account email, leaving the dialog open.
 Future<void> _openDialogAndType(WidgetTester tester) async {
   await tester.tap(find.text('Delete my account'));
   await tester.pumpAndSettle();
-  await tester.enterText(find.byType(TextField), 'DELETE');
+  await tester.enterText(find.byType(TextField), _student.email);
   await tester.pumpAndSettle();
 }
 
@@ -105,7 +108,10 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Delete your account?'), findsOneWidget);
-      expect(find.text('Type DELETE to confirm.'), findsOneWidget);
+      expect(
+        find.text('Type your email address to confirm: ${_student.email}'),
+        findsOneWidget,
+      );
 
       final button = tester.widget<FilledButton>(
         find.widgetWithText(FilledButton, 'Delete permanently'),
@@ -114,29 +120,32 @@ void main() {
       expect(button.onPressed, isNull);
     });
 
-    testWidgets('enables the button only when the word matches exactly', (
-      tester,
-    ) async {
-      await _pumpTile(tester, _harness());
-      await tester.tap(find.text('Delete my account'));
-      await tester.pumpAndSettle();
+    testWidgets(
+      'enables the button only when the email matches case-insensitively',
+      (tester) async {
+        await _pumpTile(tester, _harness());
+        await tester.tap(find.text('Delete my account'));
+        await tester.pumpAndSettle();
 
-      // Close, but not exact. Accepting a prefix would make this a speed bump
-      // rather than a decision.
-      await tester.enterText(find.byType(TextField), 'DELET');
-      await tester.pumpAndSettle();
-      var button = tester.widget<FilledButton>(
-        find.widgetWithText(FilledButton, 'Delete permanently'),
-      );
-      expect(button.onPressed, isNull);
+        // A partial address is not enough to make an irreversible action live.
+        await tester.enterText(find.byType(TextField), 'student@must.ac');
+        await tester.pumpAndSettle();
+        var button = tester.widget<FilledButton>(
+          find.widgetWithText(FilledButton, 'Delete permanently'),
+        );
+        expect(button.onPressed, isNull);
 
-      await tester.enterText(find.byType(TextField), 'DELETE');
-      await tester.pumpAndSettle();
-      button = tester.widget<FilledButton>(
-        find.widgetWithText(FilledButton, 'Delete permanently'),
-      );
-      expect(button.onPressed, isNotNull);
-    });
+        await tester.enterText(
+          find.byType(TextField),
+          _student.email.toUpperCase(),
+        );
+        await tester.pumpAndSettle();
+        button = tester.widget<FilledButton>(
+          find.widgetWithText(FilledButton, 'Delete permanently'),
+        );
+        expect(button.onPressed, isNotNull);
+      },
+    );
 
     testWidgets('dismissing the dialog deletes nothing', (tester) async {
       final harness = _harness();
@@ -183,10 +192,7 @@ void main() {
 
       // The whole point: an account the user asked to stop existing must not be
       // left holding a live session.
-      expect(
-        harness.container.read(sessionControllerProvider).profile,
-        isNull,
-      );
+      expect(harness.container.read(sessionControllerProvider).profile, isNull);
     });
 
     testWidgets('a network failure says the account is unchanged', (
@@ -227,9 +233,7 @@ void main() {
       // The realistic ordering: the token dies first, so the delete 401s. Saying
       // "nothing was changed" is what stops the user believing their account is
       // gone while it is not.
-      final harness = _harness(
-        repository: _FailingDelete(const AuthFailure()),
-      );
+      final harness = _harness(repository: _FailingDelete(const AuthFailure()));
       await _pumpTile(tester, harness);
       await _openDialogAndType(tester);
 

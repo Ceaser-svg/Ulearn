@@ -328,6 +328,20 @@ void main() {
       expect(server.calls.single.query, {'university_id': 'university-1'});
     });
 
+    test('sends university and faculty scope together', () async {
+      server.reply(200, const []);
+
+      await repository.courseUnits(
+        universityId: 'university-1',
+        subjectId: 'faculty-1',
+      );
+
+      expect(server.calls.single.query, {
+        'university_id': 'university-1',
+        'subject_id': 'faculty-1',
+      });
+    });
+
     test('an empty catalogue is a list, not a failure', () async {
       server.reply(200, const []);
 

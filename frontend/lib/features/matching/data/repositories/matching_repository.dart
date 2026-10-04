@@ -26,7 +26,10 @@ abstract interface class MatchingRepository {
   /// Reference data, read to fill the picker. The API answers a university it does
   /// not have with an empty list rather than a 404, which is what lets a picker
   /// filtered on a stale value show nothing instead of failing.
-  Future<List<CourseUnit>> courseUnits({String? universityId});
+  Future<List<CourseUnit>> courseUnits({
+    String? universityId,
+    String? subjectId,
+  });
 
   /// Who may take this course unit, in the API's ranking.
   ///
