@@ -78,7 +78,7 @@ async def test_a_session_names_its_unit_and_both_parties(
     for bodies in (listed.json(), [fetched.json()]):
         assert bodies
         for body in bodies:
-            assert DISPLAY_KEYS <= set(body), body
+            assert set(body) >= DISPLAY_KEYS, body
             assert body["course_unit_code"] == unit["code"], body
             assert body["course_unit_name"] == unit["name"], body
             assert body["tutee_name"] == TUTEE_NAME, body
@@ -95,9 +95,7 @@ async def test_a_help_request_names_its_unit_and_its_student(
     about.
     """
     unit = await first_course_unit(committed_env)
-    student = await register(
-        committed_client, "req-names-student@peerpass.mak.ac.ug"
-    )
+    student = await register(committed_client, "req-names-student@peerpass.mak.ac.ug")
     await complete_profile(committed_client, student, course_unit=unit)
     await _rename(committed_client, student, TUTEE_NAME)
 
