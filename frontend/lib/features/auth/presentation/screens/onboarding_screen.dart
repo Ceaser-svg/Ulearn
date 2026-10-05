@@ -3,13 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:peerpass/core/constants/app_dimens.dart';
 import 'package:peerpass/core/error/failures.dart';
 import 'package:peerpass/core/models/subject.dart';
+import 'package:peerpass/core/models/university_option.dart';
 import 'package:peerpass/core/widgets/content_width_limiter.dart';
 import 'package:peerpass/core/widgets/empty_view.dart';
-import 'package:peerpass/features/auth/data/models/university_option.dart';
 import 'package:peerpass/features/auth/presentation/providers/auth_providers.dart';
 import 'package:peerpass/features/auth/presentation/providers/onboarding_providers.dart';
 import 'package:peerpass/features/auth/presentation/widgets/selection_check.dart';
-
 /// The three steps a new account has to complete before it can be used.
 ///
 /// The wizard is a wizard and not one long form because the parts save

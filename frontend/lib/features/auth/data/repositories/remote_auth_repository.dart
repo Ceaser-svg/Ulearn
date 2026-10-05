@@ -1,14 +1,15 @@
 import 'package:dio/dio.dart';
 import 'package:peerpass/core/error/failures.dart';
+import 'package:peerpass/core/models/course_unit_option.dart';
+import 'package:peerpass/core/models/grade_option.dart';
 import 'package:peerpass/core/models/subject.dart';
+import 'package:peerpass/core/models/university_option.dart';
 import 'package:peerpass/core/models/user_profile.dart';
 import 'package:peerpass/core/network/network_exceptions.dart';
 import 'package:peerpass/core/storage/token_store.dart';
 import 'package:peerpass/features/auth/data/datasources/remote_academics_datasource.dart';
 import 'package:peerpass/features/auth/data/datasources/remote_auth_datasource.dart';
-import 'package:peerpass/features/auth/data/models/university_option.dart';
 import 'package:peerpass/features/auth/data/repositories/auth_repository.dart';
-
 /// [AuthRepository] over the real API.
 ///
 /// The only place that knows the wire format and the token store at the same

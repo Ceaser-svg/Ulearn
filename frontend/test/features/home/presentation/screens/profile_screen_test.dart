@@ -5,15 +5,14 @@ import 'package:go_router/go_router.dart';
 import 'package:peerpass/app/router.dart';
 import 'package:peerpass/core/error/failures.dart';
 import 'package:peerpass/core/models/subject.dart';
+import 'package:peerpass/core/models/university_option.dart';
 import 'package:peerpass/core/models/user_profile.dart';
 import 'package:peerpass/core/models/user_role.dart';
 import 'package:peerpass/core/state/session.dart';
 import 'package:peerpass/core/theme/app_theme.dart';
-import 'package:peerpass/features/auth/data/models/university_option.dart';
 import 'package:peerpass/features/auth/data/repositories/auth_repository.dart';
 import 'package:peerpass/features/auth/data/repositories/fake_auth_repository.dart';
 import 'package:peerpass/features/home/presentation/screens/profile_screen.dart';
-
 const _profile = UserProfile(
   publicId: 'user-1',
   email: 'student@must.ac.ug',

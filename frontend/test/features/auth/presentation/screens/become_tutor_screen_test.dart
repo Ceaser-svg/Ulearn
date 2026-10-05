@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:peerpass/core/models/course_unit_option.dart';
+import 'package:peerpass/core/models/grade_option.dart';
+import 'package:peerpass/core/models/university_option.dart';
 import 'package:peerpass/core/models/user_profile.dart';
 import 'package:peerpass/core/models/user_role.dart';
 import 'package:peerpass/core/state/session.dart';
 import 'package:peerpass/core/theme/app_theme.dart';
-import 'package:peerpass/features/auth/data/datasources/remote_academics_datasource.dart';
-import 'package:peerpass/features/auth/data/models/university_option.dart';
 import 'package:peerpass/features/auth/data/repositories/auth_repository.dart';
 import 'package:peerpass/features/auth/data/repositories/fake_auth_repository.dart';
 import 'package:peerpass/features/auth/presentation/screens/become_tutor_screen.dart';
-
 const UserProfile _student = UserProfile(
   publicId: 'user-1',
   email: 'student@must.ac.ug',

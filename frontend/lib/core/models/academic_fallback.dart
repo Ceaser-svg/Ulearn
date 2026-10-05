@@ -1,6 +1,6 @@
+import 'package:peerpass/core/models/grade_option.dart';
 import 'package:peerpass/core/models/subject.dart';
-import 'package:peerpass/features/auth/data/datasources/remote_academics_datasource.dart';
-import 'package:peerpass/features/auth/data/models/university_option.dart';
+import 'package:peerpass/core/models/university_option.dart';
 
 const mustFallbackUniversityId = 'fallback:must';
 

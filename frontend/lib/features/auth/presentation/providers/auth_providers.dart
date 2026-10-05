@@ -2,13 +2,13 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:peerpass/core/error/failures.dart';
+import 'package:peerpass/core/models/academic_fallback.dart';
+import 'package:peerpass/core/models/course_unit_option.dart';
+import 'package:peerpass/core/models/grade_option.dart';
 import 'package:peerpass/core/models/subject.dart';
+import 'package:peerpass/core/models/university_option.dart';
 import 'package:peerpass/core/state/session.dart';
-import 'package:peerpass/features/auth/data/datasources/remote_academics_datasource.dart';
-import 'package:peerpass/features/auth/data/models/academic_fallback.dart';
-import 'package:peerpass/features/auth/data/models/university_option.dart';
 import 'package:peerpass/features/auth/data/repositories/auth_repository.dart';
-
 /// The auth operations, as calls the screens can make.
 ///
 /// Performs authentication against the repository and records the outcome in

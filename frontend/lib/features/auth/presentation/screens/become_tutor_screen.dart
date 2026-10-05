@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:peerpass/core/constants/app_dimens.dart';
 import 'package:peerpass/core/error/failures.dart';
+import 'package:peerpass/core/models/academic_fallback.dart';
+import 'package:peerpass/core/models/course_unit_option.dart';
+import 'package:peerpass/core/models/grade_option.dart';
 import 'package:peerpass/core/state/session.dart';
-import 'package:peerpass/features/auth/data/datasources/remote_academics_datasource.dart';
-import 'package:peerpass/features/auth/data/models/academic_fallback.dart';
 import 'package:peerpass/features/auth/data/repositories/auth_repository.dart';
 import 'package:peerpass/features/auth/presentation/providers/auth_providers.dart';
-
 class BecomeTutorScreen extends ConsumerStatefulWidget {
   const BecomeTutorScreen({super.key});
 
