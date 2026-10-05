@@ -71,9 +71,13 @@ class SessionModel {
     required this.tuteeId,
     required this.tutorId,
     required this.courseUnitId,
+    required this.courseUnitCode,
+    required this.courseUnitName,
     required this.topic,
     required this.statusWire,
     required this.createdAt,
+    this.tuteeName,
+    this.tutorName,
     this.status,
     this.helpRequestId,
     this.scheduledStart,
@@ -104,6 +108,8 @@ class SessionModel {
     final courseUnitId = _readId(json, 'course_unit_id');
     final topic = json['topic'];
     final statusWire = json['status'];
+    final courseUnitCode = json['course_unit_code'];
+    final courseUnitName = json['course_unit_name'];
 
     if (id == null ||
         tuteeId == null ||
@@ -113,6 +119,12 @@ class SessionModel {
         statusWire is! String) {
       throw const FormatException(
         'session response was missing a required field',
+      );
+    }
+
+    if (courseUnitCode is! String || courseUnitName is! String) {
+      throw const FormatException(
+        'session response carried no course unit code and title',
       );
     }
 
@@ -126,6 +138,10 @@ class SessionModel {
       tuteeId: tuteeId,
       tutorId: tutorId,
       courseUnitId: courseUnitId,
+      courseUnitCode: courseUnitCode,
+      courseUnitName: courseUnitName,
+      tuteeName: _readString(json, 'tutee_name'),
+      tutorName: _readString(json, 'tutor_name'),
       topic: topic,
       statusWire: statusWire,
       status: TutoringSessionStatus.fromWire(statusWire),
@@ -153,10 +169,28 @@ class SessionModel {
 
   /// The unit's public id.
   ///
-  /// An id, and nothing more. `SessionResponse` does not carry the unit's code or
-  /// title, so the client cannot name the unit on a session screen; see the
-  /// detail screen for how that is presented until the response grows the field.
+  /// Kept because the client identifies the unit by it. The code and title beside
+  /// it are what a screen shows; an id is an identity, not a label.
   final String courseUnitId;
+
+  /// The unit's code, as the catalogue spells it.
+  ///
+  /// Required with [courseUnitCode] rather than defaulted: the API projects both
+  /// from the same row on every path, so a response missing one is a server fault
+  /// worth reporting rather than a card with a blank line on it.
+  final String courseUnitCode;
+
+  /// The unit's title.
+  final String courseUnitName;
+
+  /// The student's display name, or null when the account has not set one.
+  final String? tuteeName;
+
+  /// The tutor's display name, or null when the account has not set one.
+  final String? tutorName;
+
+  /// The unit as a reader sees it: "MAT 221 · Linear Algebra".
+  String get courseUnitLabel => '$courseUnitCode · $courseUnitName';
 
   final String topic;
 
@@ -225,6 +259,18 @@ class SessionModel {
     return null;
   }
 
+  /// The other party's name, given who is asking.
+  ///
+  /// Null for the same reason [otherPartyId] is, and also when the other account
+  /// has never set a name. The screen falls back to the public id in that case,
+  /// which is not a good answer but is an honest one -- an account with no name is
+  /// better shown as itself than given a placeholder that reads like a person.
+  String? otherPartyName(String publicId) {
+    if (isTutee(publicId)) return tutorName;
+    if (isTutor(publicId)) return tuteeName;
+    return null;
+  }
+
   /// The status as a student reads it.
   String get statusLabel => status?.label ?? statusWire;
 
@@ -246,6 +292,10 @@ class SessionModel {
       tuteeId: tuteeId,
       tutorId: tutorId,
       courseUnitId: courseUnitId,
+      courseUnitCode: courseUnitCode,
+      courseUnitName: courseUnitName,
+      tuteeName: tuteeName,
+      tutorName: tutorName,
       topic: topic,
       statusWire: statusWire ?? this.statusWire,
       status: status ?? this.status,

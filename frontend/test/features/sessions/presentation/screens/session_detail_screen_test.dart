@@ -48,6 +48,10 @@ SessionModel session({
     'tutee_id': _tutee.publicId,
     'tutor_id': _tutor.publicId,
     'course_unit_id': 'unit-1',
+    'course_unit_code': 'MAT 221',
+    'course_unit_name': 'Linear Algebra',
+    'tutee_name': 'Adongo Sarah',
+    'tutor_name': 'Okello Daniel',
     'topic': 'Second order ODEs',
     'status': status,
     'duration_minutes': 60,
@@ -119,12 +123,46 @@ void main() {
       );
 
       expect(find.text('Second order ODEs'), findsOneWidget);
-      // `SessionResponse` names the other party by public id and carries no
-      // display name, so the row says which side the reader is on rather than
-      // inventing a name for it.
+      // Names, not public ids. This row used to render the other party's
+      // public_id because `SessionResponse` carried no display name for either
+      // party, which showed a student a UUID instead of the person they were
+      // about to meet. The API now projects both names and the unit's code and
+      // title beside the ids.
+      expect(find.text('Tutor'), findsOneWidget);
+      expect(find.text('Okello Daniel'), findsOneWidget);
+      expect(find.text(_tutor.publicId), findsNothing);
+      expect(find.text('MAT 221 · Linear Algebra'), findsOneWidget);
+      expect(find.text('1 hr'), findsOneWidget);
+    });
+
+    testWidgets('falls back to the public id when the other party is unnamed', (
+      tester,
+    ) async {
+      // An account can exist without a display name. The row is about
+      // identifying a person the reader is about to meet, so it shows the id
+      // rather than leaving a labelled row empty -- but it is a fallback, not
+      // the normal reading.
+      final unnamed = SessionModel(
+        id: 'session-1',
+        tuteeId: _tutee.publicId,
+        tutorId: _tutor.publicId,
+        courseUnitId: 'unit-1',
+        courseUnitCode: 'MAT 221',
+        courseUnitName: 'Linear Algebra',
+        topic: 'Second order ODEs',
+        statusWire: 'scheduled',
+        createdAt: DateTime.utc(2026, 3, 1, 8),
+        scheduledStart: DateTime.utc(2026, 3, 2, 9),
+        durationMinutes: 60,
+      );
+      await _pumpDetail(
+        tester,
+        FakeSessionsRepository(sessions: [unnamed]),
+        _tutee,
+      );
+
       expect(find.text('Tutor'), findsOneWidget);
       expect(find.text(_tutor.publicId), findsOneWidget);
-      expect(find.text('1 hr'), findsOneWidget);
     });
 
     testWidgets('a meeting link is copyable rather than tappable', (

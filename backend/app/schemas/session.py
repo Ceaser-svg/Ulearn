@@ -78,13 +78,17 @@ class HelpRequestResponse(OrmSchema):
 
     id: uuid.UUID = Field(validation_alias="public_id")
     tutee_id: uuid.UUID = Field(validation_alias="tutee_public_id")
+    tutee_name: str | None = None
     course_unit_id: uuid.UUID = Field(validation_alias="course_unit_public_id")
+    course_unit_code: str
+    course_unit_name: str
     topic: str
     description: str | None = None
     status: HelpRequestStatus
     matched_tutor_id: uuid.UUID | None = Field(
         default=None, validation_alias="matched_tutor_public_id"
     )
+    matched_tutor_name: str | None = None
     created_at: datetime
 
 
@@ -183,6 +187,12 @@ class SessionResponse(OrmSchema):
 
     Carries both parties' public ids because both need to name the other, and
     because the two clients are the same app.
+
+    The ids are joined by display names because a session card has to answer
+    "who am I meeting, and for what", and an opaque public id answers neither.
+    The names are additions beside the ids rather than replacements for them: the
+    ids are what the client identifies records by, and a rename must not change
+    the identity of a session the two parties already hold.
     """
 
     id: uuid.UUID = Field(validation_alias="public_id")
@@ -192,6 +202,10 @@ class SessionResponse(OrmSchema):
     tutee_id: uuid.UUID = Field(validation_alias="tutee_public_id")
     tutor_id: uuid.UUID = Field(validation_alias="tutor_public_id")
     course_unit_id: uuid.UUID = Field(validation_alias="course_unit_public_id")
+    course_unit_code: str
+    course_unit_name: str
+    tutee_name: str | None = None
+    tutor_name: str | None = None
     topic: str
     status: SessionStatus
     scheduled_start: datetime | None = None
