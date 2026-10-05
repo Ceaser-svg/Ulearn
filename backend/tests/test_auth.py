@@ -31,6 +31,7 @@ from app.models.course_unit import Subject, University
 from app.models.enums import UserRole
 from app.models.grading_scale import Grade, GradingScale
 from app.models.user import RefreshToken, User
+from tests.support import bearer
 
 REGISTER_URL = "/v1/auth/register"
 LOGIN_URL = "/v1/auth/login"
@@ -782,10 +783,7 @@ async def test_academics_are_readable_before_signing_in(
     """Sign-up asks a stranger where they study, so these cannot need a token."""
     await seed(db_session)
     university_id = (await client.get("/v1/academics/universities")).json()[0]["id"]
-    for url in (
-        "/v1/academics/universities",
-        "/v1/academics/course-units",
-    ):
+    for url in ("/v1/academics/universities",):
         assert (await client.get(url)).status_code == 200, url
     assert (
         await client.get(
@@ -795,23 +793,77 @@ async def test_academics_are_readable_before_signing_in(
     ).status_code == 200
 
 
+async def test_the_course_catalogue_needs_a_session(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """The one academics route that is not public, and why.
+
+    A list of institutions and faculties is public information: a stranger
+    registering needs both. The course catalogue is not, because it answers
+    "which courses may this account act on", which is scoped to one person's
+    faculty. Leaving it open would hand every anonymous caller the whole pilot
+    catalogue and make the scoping that endpoint now performs a client-side
+    convention rather than a boundary.
+    """
+    await seed(db_session)
+
+    anonymous = await client.get("/v1/academics/course-units")
+    assert anonymous.status_code == 401, anonymous.text
+
+    student = await register(client, "catalogue.gate@student.must.ac.ug")
+    signed_in = await client.get("/v1/academics/course-units", headers=bearer(student))
+    assert signed_in.status_code == 200, signed_in.text
+
+
 async def test_seed_exposes_only_the_provisional_pilot_course_units(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
+    """The catalogue, read one faculty at a time, because that is all a caller sees.
+
+    Asserted per faculty rather than as one flat list: the units are seeded under
+    two faculties and an account belongs to exactly one of them, so a single
+    assertion would need the unscoped listing this endpoint deliberately is not.
+    """
     await seed(db_session)
+    university_id = (await client.get("/v1/academics/universities")).json()[0]["id"]
+    faculties = (
+        await client.get(
+            "/v1/academics/faculties",
+            params={"university_id": university_id},
+        )
+    ).json()
+    by_name = {faculty["name"]: faculty["id"] for faculty in faculties}
 
-    units = (await client.get("/v1/academics/course-units")).json()
-
-    assert {(unit["code"], unit["name"]) for unit in units} == {
-        ("BIT 221", "Operating Systems"),
-        ("BIT 223", "Database Programming"),
-        ("BIT 225", "Computer Networks"),
-        ("SCH 211", "Organic Chemistry"),
-        ("PHY 212", "Thermodynamics"),
-        ("MTH 213", "Linear Algebra"),
+    expected_by_faculty = {
+        "Faculty of Computing and Informatics Sciences": {
+            ("BIT 221", "Operating Systems"),
+            ("BIT 223", "Database Programming"),
+            ("BIT 225", "Computer Networks"),
+        },
+        "Faculty of Science": {
+            ("SCH 211", "Organic Chemistry"),
+            ("PHY 212", "Thermodynamics"),
+            ("MTH 213", "Linear Algebra"),
+        },
     }
+
+    student = await register(client, "catalogue@student.must.ac.ug")
+    listed: set[tuple[str, str]] = set()
+    for name, expected in expected_by_faculty.items():
+        chosen = await client.patch(
+            PROFILE_URL,
+            headers=bearer(student),
+            json={"university_id": university_id, "faculty_id": by_name[name]},
+        )
+        assert chosen.status_code == 200, chosen.text
+        units = (
+            await client.get("/v1/academics/course-units", headers=bearer(student))
+        ).json()
+        assert {(unit["code"], unit["name"]) for unit in units} == expected, name
+        listed |= {(unit["code"], unit["name"]) for unit in units}
+
     assert not any(
-        unit["name"] in {"Computer Science", "Information Technology"} for unit in units
+        name in {"Computer Science", "Information Technology"} for _code, name in listed
     )
 
 

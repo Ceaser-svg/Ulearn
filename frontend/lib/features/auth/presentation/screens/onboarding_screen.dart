@@ -4,6 +4,7 @@ import 'package:peerpass/core/constants/app_dimens.dart';
 import 'package:peerpass/core/error/failures.dart';
 import 'package:peerpass/core/models/subject.dart';
 import 'package:peerpass/core/widgets/content_width_limiter.dart';
+import 'package:peerpass/core/widgets/empty_view.dart';
 import 'package:peerpass/features/auth/data/models/university_option.dart';
 import 'package:peerpass/features/auth/presentation/providers/auth_providers.dart';
 import 'package:peerpass/features/auth/presentation/providers/onboarding_providers.dart';
@@ -27,12 +28,31 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     // The controller keeps the reason on the state, so the screen only has to
     // ask it to try. A false return means the step did not move, and the
     // controller has already recorded why.
-    return ref.read(onboardingControllerProvider.notifier).saveAndAdvance();
+    //
+    // Whether the catalogue came back empty is handed in rather than looked up by
+    // the controller, which may not read a provider that depends on it. `null`
+    // while loading and again after a failure, and `isEmpty` is only true of a
+    // list that arrived, so neither opens the module step.
+    final universityId = ref.read(onboardingControllerProvider).universityId;
+    final facultyId = ref.read(onboardingControllerProvider).facultyId;
+    final units = universityId != null && facultyId != null
+        ? ref.read(
+            courseUnitsProvider((
+              universityId: universityId,
+              subjectId: facultyId,
+            )),
+          )
+        : null;
+    final emptyCatalogue = units?.asData?.value.isEmpty == true;
+    return ref
+        .read(onboardingControllerProvider.notifier)
+        .saveAndAdvance(facultyHasNoCourseUnits: emptyCatalogue);
   }
 
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(onboardingControllerProvider);
+    final canAdvance = ref.watch(canAdvanceWizardProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -86,7 +106,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                         ),
                       ),
                     FilledButton(
-                      onPressed: state.canContinue && !state.saving
+                      onPressed: canAdvance && !state.saving
                           ? _saveAndAdvance
                           : null,
                       child: state.saving
@@ -568,20 +588,36 @@ class _PrimaryModulesStep extends ConsumerWidget {
                   color: theme.colorScheme.error,
                 ),
               ),
-              data: (units) => Wrap(
-                spacing: AppDimens.sm,
-                runSpacing: AppDimens.sm,
-                children: [
-                  for (final unit in units)
-                    FilterChip(
-                      label: Text('${unit.code} - ${unit.name}'),
-                      selected: state.primaryModuleIds.contains(unit.publicId),
-                      onSelected: (_) => ref
-                          .read(onboardingControllerProvider.notifier)
-                          .togglePrimaryModule(unit.publicId),
+              data: (units) => units.isEmpty
+                  // Four of the six seeded faculties hold no course units, so a
+                  // student in one arrives here with nothing to pick and no way
+                  // past the step. Said plainly, because a bare heading with
+                  // nothing under it reads as a bug in the app rather than a
+                  // fact about the catalogue.
+                  ? const EmptyView(
+                      icon: Icons.menu_book_outlined,
+                      title: 'No course units yet',
+                      message:
+                          'Your faculty has not published any course units yet, '
+                          'so there is nothing to choose here. You can finish '
+                          'setting up your profile and add units later.',
+                    )
+                  : Wrap(
+                      spacing: AppDimens.sm,
+                      runSpacing: AppDimens.sm,
+                      children: [
+                        for (final unit in units)
+                          FilterChip(
+                            label: Text('${unit.code} - ${unit.name}'),
+                            selected: state.primaryModuleIds.contains(
+                              unit.publicId,
+                            ),
+                            onSelected: (_) => ref
+                                .read(onboardingControllerProvider.notifier)
+                                .togglePrimaryModule(unit.publicId),
+                          ),
+                      ],
                     ),
-                ],
-              ),
             ),
       ],
     );

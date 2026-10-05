@@ -38,10 +38,7 @@ void main() {
       expect(profile.universityId, 'university-1');
       expect(profile.facultyId, 'subject-1');
       expect(profile.yearOfStudy, 2);
-      expect(
-        profile.academicDataConsentedAt,
-        DateTime.utc(2026, 1, 15, 9, 30),
-      );
+      expect(profile.academicDataConsentedAt, DateTime.utc(2026, 1, 15, 9, 30));
       expect(profile.primaryCourseUnitIds, <String>['unit-1']);
     });
 
@@ -80,7 +77,9 @@ void main() {
       // Forward compatibility. The pilot is still adding roles, and a new one
       // must show up as a student with fewer capabilities, not as a launch crash.
       final profile = UserProfile.fromJson(
-        _bodyWith(roles: const <String>['student', 'department_chair', 'tutor']),
+        _bodyWith(
+          roles: const <String>['student', 'department_chair', 'tutor'],
+        ),
       );
 
       expect(profile.roles, <UserRole>{UserRole.student, UserRole.tutor});
@@ -100,6 +99,8 @@ void main() {
     UserProfile profileWith({
       String? fullName = 'Achieng Okello',
       String? universityId = 'university-1',
+      String? facultyId = 'faculty-1',
+      List<String> primaryCourseUnitIds = const <String>['unit-1'],
     }) {
       return UserProfile(
         publicId: 'user-1',
@@ -107,11 +108,12 @@ void main() {
         roles: const <UserRole>{UserRole.student},
         fullName: fullName,
         universityId: universityId,
-        primaryCourseUnitIds: const <String>['unit-1'],
+        facultyId: facultyId,
+        primaryCourseUnitIds: primaryCourseUnitIds,
       );
     }
 
-    test('is false once a name and a university are both stored', () {
+    test('is false once a name, a university and a faculty are stored', () {
       expect(profileWith().needsOnboarding, isFalse);
     });
 
@@ -131,6 +133,28 @@ void main() {
       // A name alone is not a usable account: matching is scoped to a
       // university and its grading scale.
       expect(profileWith(universityId: null).needsOnboarding, isTrue);
+    });
+
+    test('is true when the faculty is missing', () {
+      // A name and a university are not enough either. The course catalogue and
+      // the tutor rail are both scoped to the faculty, so an account without one
+      // is served an empty catalogue and would see an app full of nothing. The
+      // faculty is step two of the wizard, so the gate can send it back.
+      expect(profileWith(facultyId: null).needsOnboarding, isTrue);
+    });
+
+    test('is false with no declared course units', () {
+      // The one gate that must not depend on this. Four of the six seeded
+      // faculties publish no course units, so a student of one of them can never
+      // declare any. Gating on a declared unit would send them back through the
+      // wizard on every launch, for ever, with nothing they can do about it --
+      // the wizard would be asking for something their faculty does not teach.
+      // The module step still asks, and the course screens behind this gate
+      // render their own empty state.
+      expect(
+        profileWith(primaryCourseUnitIds: const <String>[]).needsOnboarding,
+        isFalse,
+      );
     });
   });
 

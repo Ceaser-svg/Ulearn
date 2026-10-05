@@ -38,6 +38,7 @@ from app.models.session import Session
 from app.models.tutor_profile import TutorProfile
 from app.models.user import User, set_roles
 from app.schemas.tutor import MAX_RAIL_TUTORS, RAIL_ENDORSED_UNITS
+from tests.support import sole_faculty_id
 
 GOOD_PASSWORD = "correct horse battery staple"
 
@@ -83,6 +84,7 @@ async def _account(
         user.full_name = full_name
     if university is not None:
         user.university_id = university.id
+        user.faculty_id = await sole_faculty_id(db_session, university)
     await db_session.commit()
     return body, user
 
@@ -156,11 +158,20 @@ async def _tutor(
     create one. Both the rail and matching have to have an answer for it, and a
     rule that is only tested against its own happy path is not a rule.
     """
+    # Placed in the faculty of the units they teach rather than looked up: the same
+    # answer by construction, and it cannot drift from the units a test is about to
+    # look for this tutor under. Asserted because a fixture handed units from two
+    # faculties has no single correct faculty to pick.
+    subjects = {unit.subject_id for unit in units}
+    assert len(subjects) == 1, (
+        "a tutor belongs to one faculty, so the units handed here must share one"
+    )
     user = User(
         email=email,
         password_hash="hashed-password",
         full_name=full_name,
         university=university,
+        faculty_id=subjects.pop(),
     )
     db_session.add(user)
     if profile:

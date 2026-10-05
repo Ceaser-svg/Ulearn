@@ -32,6 +32,14 @@ class _FakeServer implements HttpClientAdapter {
   final List<_Call> calls = [];
   final List<Object?> _replies = [];
 
+  /// Runs as a request is dispatched, before its reply is read.
+  ///
+  /// Lets a test assert on client state *at the wire*. That is the only place
+  /// an ordering bug of this kind is visible: a repository that clears its
+  /// tokens one line too early still satisfies a test which only inspects the
+  /// state after the call has returned.
+  Future<void> Function()? onFetch;
+
   /// Queues one reply. A [DioException] is thrown instead of returned.
   void reply(
     int status,
@@ -49,6 +57,7 @@ class _FakeServer implements HttpClientAdapter {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
+    await onFetch?.call();
     calls.add(
       _Call(
         options.method,
@@ -445,6 +454,68 @@ void main() {
 
       expect(server.calls.single.path, '/v1/auth/logout');
       expect(server.calls.single.body, {'refresh_token': 'refresh-1'});
+    });
+  });
+
+  group('deleting the account', () {
+    test('the request goes out while the access token is still held', () async {
+      // The bug this pins. The access token *is* the authorisation for this
+      // request, so clearing the store before sending leaves the client holding
+      // nothing and the API answers 401: the account survives, and the user is
+      // signed out of an account they asked to erase.
+      await store.write(accessToken: 'access-1', refreshToken: 'refresh-1');
+      String? heldAtTheWire;
+      server
+        ..onFetch = () async {
+          heldAtTheWire = await store.readAccessToken();
+        }
+        ..reply(204, null);
+
+      await repository.deleteAccount();
+
+      expect(heldAtTheWire, 'access-1');
+      expect(server.calls.single.method, 'DELETE');
+      expect(server.calls.single.path, '/v1/users/me');
+    });
+
+    test('clears the tokens once the server has confirmed', () async {
+      await store.write(accessToken: 'access-1', refreshToken: 'refresh-1');
+      server.reply(204, null);
+
+      await repository.deleteAccount();
+
+      expect(await store.readAccessToken(), isNull);
+      expect(await store.readRefreshToken(), isNull);
+    });
+
+    test('a refused delete keeps the session, so a retry is still possible',
+        () async {
+      // What the screen offers when it says "your account is unchanged, try
+      // again" has to be true. Signing out on the way past is what turned a
+      // failed delete into a dead end.
+      await store.write(accessToken: 'access-1', refreshToken: 'refresh-1');
+      server.reply(500, {'status': 500, 'detail': 'could not reach the store'});
+
+      await expectLater(repository.deleteAccount(), throwsA(isA<Failure>()));
+
+      expect(await store.readAccessToken(), 'access-1');
+      expect(await store.readRefreshToken(), 'refresh-1');
+    });
+
+    test('an unauthorised delete keeps the tokens rather than signing out',
+        () async {
+      // The specific failure that was reported. Even when the server refuses,
+      // throwing away the credentials leaves the user with no way back in and
+      // an account they were told was not deleted.
+      await store.write(accessToken: 'access-1', refreshToken: 'refresh-1');
+      server.reply(401, {'status': 401, 'detail': 'Could not validate credentials'});
+
+      await expectLater(
+        repository.deleteAccount(),
+        throwsA(isA<AuthFailure>()),
+      );
+
+      expect(await store.readAccessToken(), 'access-1');
     });
   });
 

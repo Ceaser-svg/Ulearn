@@ -37,11 +37,11 @@ async def test_a_below_threshold_grade_cannot_be_verified_by_an_operator(
     the kind of false claim an audit is supposed to be able to rule out.
     """
     client = committed_env.client
-    course_unit = await first_course_unit(client)
+    course_unit = await first_course_unit(committed_env)
     grade_d = await grade_named(client, "D")
 
     tutor = await register(client, "threshold.tutor@student.mak.ac.ug")
-    await complete_profile(client, tutor, course_unit_id=course_unit["id"])
+    await complete_profile(client, tutor, course_unit=course_unit)
 
     submitted = await client.post(
         "/v1/competencies",
@@ -86,11 +86,11 @@ async def test_a_tutor_cannot_verify_their_own_competency(
     being reachable.
     """
     client = committed_env.client
-    course_unit = await first_course_unit(client)
+    course_unit = await first_course_unit(committed_env)
     grade_a = await grade_named(client, "A")
 
     tutor = await register(client, "selfreview.tutor@student.mak.ac.ug")
-    await complete_profile(client, tutor, course_unit_id=course_unit["id"])
+    await complete_profile(client, tutor, course_unit=course_unit)
     submitted = await client.post(
         "/v1/competencies",
         headers=bearer(tutor),
@@ -126,11 +126,11 @@ async def test_a_submitted_competency_survives_its_own_request(
     satisfied those loads from its identity map.
     """
     client = committed_env.client
-    course_unit = await first_course_unit(client)
+    course_unit = await first_course_unit(committed_env)
     grade_a = await grade_named(client, "A")
 
     tutor = await register(client, "persisting.tutor@student.mak.ac.ug")
-    await complete_profile(client, tutor, course_unit_id=course_unit["id"])
+    await complete_profile(client, tutor, course_unit=course_unit)
 
     created = await client.post(
         "/v1/competencies",

@@ -24,6 +24,39 @@ such as BIT 221 is a matchable learning unit.
 | Faculty of Science | PHY 212 | Thermodynamics |
 | Faculty of Science | MTH 213 | Linear Algebra |
 
+## Faculties with no course units
+
+Six faculties are seeded and only two of them — Computing and Informatics
+Sciences, and Science — publish any course units. The other four are present so
+that a student can choose the faculty they actually study in, and they answer
+with nothing:
+
+| Faculty | Course units |
+| --- | --- |
+| Faculty of Applied Sciences and Technology | none seeded |
+| Faculty of Interdisciplinary Studies | none seeded |
+| Faculty of Business and Management Sciences | none seeded |
+| Faculty of Medicine | none seeded |
+
+This is a normal state for the pilot, not a data fault, and the app is built for
+it. For a student of one of these faculties:
+
+- `GET /v1/academics/course-units` returns `[]`.
+- The tutor rail returns `[]` — there are no units, so there is nothing to match
+  and no tutor holds a competency for a unit these faculties do not teach.
+- Onboarding still completes. The module step explains that the faculty has
+  published nothing and lets the student finish with nothing chosen, because a
+  gate that required a declared unit would return such a student to the wizard on
+  every launch, for ever, with nothing they could do about it.
+
+A student cannot reach the app by picking a faculty with no units; the four rows
+are there so the picker offers the faculty the student actually belongs to rather
+than only the two that happen to have content.
+
+Before launch, MUST operations must supply the units for these faculties, or the
+pilot has no launch list for a large share of its own students. That is item 1 of
+the process below and it applies to every faculty, not just this table.
+
 ## Approval and change process
 
 Before pilot invitations are issued, MUST operations must provide:

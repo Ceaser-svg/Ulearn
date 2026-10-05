@@ -650,11 +650,73 @@ nothing else:
   it only when a unit was named would mean the same tutor passes in one query and
   fails in the other depending on which screen asked.
 
-A well-formed `course_unit_id` that is unknown, or belongs to another university,
-returns `[]` rather than an error. Same reasoning as
+A well-formed `course_unit_id` that is unknown, belongs to another university, or
+belongs to another faculty, returns `[]` rather than an error. Same reasoning as
 `GET /v1/academics/course-units`: the client filtered on a value it believed
 existed, and a refusal would put a student's discovery screen into an error state
 over a stale picker value.
+
+### 7.4a The faculty silo, and where it is and is not a filter
+
+The university silo is enforced by *filtering*: a tutor at another university is
+not in the list, and asking for their unit returns `[]`.
+
+The faculty silo is enforced by *scope*, and the distinction matters when deciding
+what may be widened later.
+
+- **Where it filters** — the tutor rail with no unit named, the course catalogue,
+  and the units a tutor may declare a competency for. A record outside the
+  caller's own faculty is not returned at all. `GET /v1/academics/course-units`
+  answers for exactly one faculty, so it requires a token; a signed-out client has
+  no faculty to be scoped to and the wizard does not need it, since universities
+  and faculties stay public for the choice that precedes it.
+- **Where it does not filter** — a tutor's detail screen, which any authenticated
+  user may open. A student holding a link to a tutor outside their faculty must
+  see who they are about to ask. The rail that *proposes* tutors never crosses the
+  line; a direct link may, and revealing a person's teaching record to anyone with
+  the URL is not the harm the silo exists to prevent.
+
+The rail is filtered by faculty when no unit is named, but a unit-scoped rail is
+governed by that unit's own faculty rather than the caller's. This is not a
+loophole: a tutor is proposed for a unit only by holding a competency *for that
+unit*, and a competency can only be recorded for a unit their own faculty teaches,
+so the unit's faculty and the tutor's faculty cannot diverge on any result. Naming
+a unit from another faculty therefore returns `[]` rather than leaking its tutors.
+
+### 7.4b A faculty that publishes nothing is a normal state
+
+Four of the six seeded faculties hold no course units. Everything downstream has to
+answer for that rather than treat it as damage:
+
+- `GET /v1/academics/course-units` returns `[]`, and the rail returns `[]`.
+- `PATCH /v1/users/me` accepts `primary_course_unit_ids: []` as a request to clear
+  the selection. An empty list is valid input, not a validation failure.
+- **"No declared course units" is not an incomplete account.** The client gate that
+  sends an unfinished profile back through onboarding checks for a name, a
+  university and a faculty — not for a declared unit. A student of a faculty that
+  teaches nothing could never declare one, so a gate that waited for it would
+  return them to the wizard on every launch, for ever, with no way out. The module
+  step still asks the question and still has to be answered to leave the wizard;
+  what it must not do is bar the app to a student who has answered it as fully as
+  their faculty allows.
+- Declared units are a matching input and a precondition of nothing else. No
+  endpoint reads them as a gate, so their absence cannot block anything else.
+
+### 7.4c Changing faculty clears the declared units
+
+Changing faculty drops `primary_course_unit_ids` in the same request, and the
+units are validated against the faculty being set rather than the one stored
+before it. Both halves are load-bearing:
+
+- Units are scoped to the faculty that publishes them. Keeping the old ones would
+  leave a profile that reads as complete while every endpoint refuses them.
+- Validating against the *new* faculty is what lets the wizard's second and third
+  steps save together. Validating against the stored faculty would reject a
+  student's correct first choice.
+
+The client says so when the change is made. A student whose profile visibly
+changes faculty and is then quietly asked to choose course units again would
+otherwise read the second request as a fault.
 
 The rail's endorsed-unit list is capped at `RAIL_ENDORSED_UNITS` and the full
 total travels beside it. A tutor endorsed in fourteen units is not summarised by

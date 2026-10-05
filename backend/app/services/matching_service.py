@@ -36,6 +36,7 @@ from app.schemas.session import (
     SelectTutorRequest,
 )
 from app.schemas.tutor import TutorProfileSummary
+from app.services import faculty_scope
 
 
 async def create_help_request(
@@ -51,11 +52,8 @@ async def create_help_request(
         )
 
     course_unit = await _load_course_unit(db, payload.course_unit_id)
-    if course_unit.university_id != user.university_id:
-        raise ValidationProblem(
-            "That course unit does not belong to your university.",
-            errors={"course_unit_id": "must match your university"},
-        )
+    faculty_scope.require_own_university(course_unit, user)
+    faculty_scope.require_own_faculty(course_unit, user)
 
     request = HelpRequest(
         tutee_id=user.id,
@@ -336,11 +334,8 @@ async def _match_for_unit(
         )
 
     target = await _load_course_unit(db, course_unit_id)
-    if target.university_id != user.university_id:
-        raise ValidationProblem(
-            "You can only match tutors from your university.",
-            errors={"course_unit_id": "must match your university"},
-        )
+    faculty_scope.require_own_university(target, user)
+    faculty_scope.require_own_faculty(target, user)
 
     candidates, exclusions, widened = await _search_candidates(
         db,

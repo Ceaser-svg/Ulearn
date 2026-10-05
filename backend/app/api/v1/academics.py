@@ -3,6 +3,11 @@
 No create, update, or delete. Universities, faculties, and course units are
 administrator-loaded, and a student who could invent a course unit their own
 transcript never mentioned could manufacture a match for it.
+
+Course units are the one authenticated endpoint here. The rest describe an
+institution to somebody choosing where to study, which is public; the course
+catalogue is narrowed to the caller's own faculty, so the server has to know who is
+asking before it can answer.
 """
 
 import uuid
@@ -12,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import DatabaseSession
+from app.api.deps import CurrentUser, DatabaseSession
 from app.models.course_unit import CourseUnit, Program, Subject, University
 from app.models.grading_scale import Grade, GradingScale
 from app.schemas.academic import (
@@ -23,6 +28,7 @@ from app.schemas.academic import (
     SubjectResponse,
     UniversityResponse,
 )
+from app.services import faculty_scope
 
 router = APIRouter(prefix="/academics", tags=["academics"])
 
@@ -144,41 +150,45 @@ async def list_programs(
 )
 async def list_course_units(
     db: DatabaseSession,
+    caller: CurrentUser,
     subject_id: uuid.UUID | None = None,
     university_id: uuid.UUID | None = None,
 ) -> list[CourseUnitResponse]:
-    """Course units, optionally narrowed to one faculty and/or university.
+    """The course units the caller may act on, narrowed by faculty.
 
-    The `subject_id` filter is the wizard's second-step usage: a student who has
-    named their faculty is offered only the units belonging to it.
+    Always scoped to the caller's own faculty, whichever filters arrive on the query
+    string. The filters exist for rendering -- the wizard asks for its faculty, the
+    profile screen asks for the university -- and they can only ever narrow the
+    answer further. A student who belongs to the Faculty of Computing is offered the
+    Computing units, and cannot reach another faculty's by omitting a parameter,
+    because the faculty is taken from the account rather than from the request.
 
-    The `university_id` filter is the wizard's third step: a student who has
-    chosen their university sees only that institution's units to declare as their
-    primary modules. Both filters may be combined.
+    Authenticated for that reason. The other reference endpoints stay open, because a
+    list of institutions and faculties is public information; a course catalogue
+    scoped to one person is not.
 
     Ordered by code, because a student scanning for `BIT 221` is looking for a
     code, not for alphabetical position.
     """
-    query = select(CourseUnit).options(
-        selectinload(CourseUnit.university),
-        selectinload(CourseUnit.subject),
-        selectinload(CourseUnit.grade),
+    query = faculty_scope.visible_to(
+        select(CourseUnit).options(
+            selectinload(CourseUnit.university),
+            selectinload(CourseUnit.subject),
+            selectinload(CourseUnit.grade),
+        ),
+        caller.user,
     )
     if subject_id is not None:
         subject_uuid = await _subject_uuid(db, subject_id)
         if subject_uuid is None:
             return []
-        query = query.join(Subject, CourseUnit.subject_id == Subject.id).where(
-            CourseUnit.subject_id == subject_uuid
-        )
+        query = query.where(CourseUnit.subject_id == subject_uuid)
 
     if university_id is not None:
         uni_uuid = await _university_uuid(db, university_id)
         if uni_uuid is None:
             return []
         query = query.where(CourseUnit.university_id == uni_uuid)
-        if subject_id is not None:
-            query = query.where(Subject.university_id == uni_uuid)
 
     result = await db.execute(query.order_by(CourseUnit.university_id, CourseUnit.code))
     return [CourseUnitResponse.model_validate(row) for row in result.scalars()]

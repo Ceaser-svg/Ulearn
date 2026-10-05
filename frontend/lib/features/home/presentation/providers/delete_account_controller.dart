@@ -14,12 +14,16 @@ final deleteAccountControllerProvider =
     Provider<Future<void> Function()>((ref) {
   return () async {
     final failure = await _run(ref);
-    // The session ends whether or not the request reached the server. The
-    // repository clears the tokens before it calls, so the client is already
-    // holding nothing; refusing to record the signed-out state would leave the
-    // shell showing a signed-in home screen whose every request now 401s.
-    ref.read(sessionControllerProvider.notifier).signedOut();
-    if (failure != null) throw failure;
+    // The session ends only when the account is actually gone. A failure means
+    // the server still holds the account *and* the tokens are still valid, so
+    // signing out here would tear down the screen before it could explain what
+    // happened and would leave the user signed out of an account they had every
+    // reason to expect to be erased.
+    if (failure == null) {
+      ref.read(sessionControllerProvider.notifier).signedOut();
+      return;
+    }
+    throw failure;
   };
 });
 

@@ -56,10 +56,10 @@ class _FailingDelete extends FakeAuthRepository {
 
   @override
   Future<void> deleteAccount() async {
-    // Still clears the session, because the real implementation does. A fake that
-    // left the session intact would let a screen pass by showing a stale home
-    // screen that the real one never reaches.
-    await super.deleteAccount();
+    // Deliberately does *not* end the session. The request failed, so the
+    // account is still on the server and the tokens are still good; a fake that
+    // signed the user out would let the screen pass against a contract the real
+    // repository no longer has.
     throw failure;
   }
 }
@@ -243,10 +243,14 @@ void main() {
       expect(find.textContaining('nothing was deleted'), findsOneWidget);
     });
 
-    testWidgets('signs out even when the delete failed', (tester) async {
-      // Deliberate. The repository clears the tokens before it calls, so the
-      // client is holding nothing either way; refusing to record the signed-out
-      // state would leave a home screen whose every request 401s.
+    testWidgets('keeps the session alive when the delete failed', (
+      tester,
+    ) async {
+      // The load-bearing half of the fix, and the reason the message is now
+      // visible at all. A failed delete means the account is still whole *and*
+      // the session is still good, so ending it here would replace the
+      // explanation with a sign-in form and take away the retry the sentence
+      // tells the user to make.
       final harness = _harness(
         repository: _FailingDelete(const NetworkFailure()),
       );
@@ -258,8 +262,10 @@ void main() {
 
       expect(
         harness.container.read(sessionControllerProvider).isSignedIn,
-        isFalse,
+        isTrue,
       );
+      // And the reason is still on screen rather than replaced by a redirect.
+      expect(find.textContaining('your account is unchanged'), findsOneWidget);
     });
 
     testWidgets('does not fire twice while the request is in flight', (

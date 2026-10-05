@@ -54,7 +54,7 @@ from app.schemas.user import (
     TokenResponse,
     UpdateProfileRequest,
 )
-from app.services import rate_limit
+from app.services import faculty_scope, rate_limit
 
 #: One message for every sign-in failure.
 #:
@@ -623,12 +623,22 @@ async def update_profile(
         if user.university_id != previous_university:
             user.faculty_id = None
     if "faculty_id" in sent:
+        previous_faculty = user.faculty_id
         faculty_university = user.university_id
         user.faculty_id = await _resolve_subject(
             db,
             sent["faculty_id"],
             university_id=faculty_university,
         )
+        if user.faculty_id != previous_faculty:
+            # Every module chosen under the old faculty is now out of scope, so
+            # they are dropped rather than kept. Same shape as the university
+            # change clearing the faculty one step up: moving between faculties
+            # invalidates the whole course selection, and a profile listing
+            # modules the account can no longer act on is a claim about itself
+            # that is not true. Re-picking them is the onboarding gate's job, not
+            # this function's.
+            await _clear_primary_course_units(db, user)
     if "year_of_study" in sent:
         user.year_of_study = sent["year_of_study"]
     if "full_name" in sent:
@@ -639,10 +649,20 @@ async def update_profile(
     if "primary_course_unit_ids" in sent:
         from app.models.user import set_primary_course_units
 
-        internal_ids = await _resolve_course_units(db, sent["primary_course_unit_ids"])
+        internal_ids = await _resolve_course_units(
+            db, sent["primary_course_unit_ids"], user
+        )
         await set_primary_course_units(db, user.id, internal_ids)
 
     await db.commit()
+    # `CurrentUserResponse` reads `university_id` and `faculty_id` back through
+    # the relationships, and a query that returns an object already in the
+    # session keeps whatever attribute values it already holds. So after writing
+    # the foreign keys, re-reading is not enough: it hands back the faculty from
+    # before this request, or `None` for an account that had none. Expiring the
+    # two relationships is what makes the reload below re-fetch them. The columns
+    # need no such treatment, being plain attributes already written in place.
+    db.expire(user, ["university", "faculty"])
     # The relationships are stale after writing to the foreign keys, and a
     # lazy load would raise on an async session, so they are refreshed from the
     # database rather than read off the instance.
@@ -690,21 +710,47 @@ async def _resolve_subject(
     return row
 
 
+async def _clear_primary_course_units(db: AsyncSession, user: User) -> None:
+    from app.models.user import set_primary_course_units
+
+    await set_primary_course_units(db, user.id, [])
+
+
 async def _resolve_course_units(
-    db: AsyncSession, public_ids: list[uuid.UUID] | None
+    db: AsyncSession, public_ids: list[uuid.UUID] | None, user: User
 ) -> list[uuid.UUID]:
-    """The primary keys for the course units."""
+    """The primary keys for the course units, each inside the caller's own faculty.
+
+    Existence is not the only question asked here. A primary module seeds the
+    matching phase, so accepting one from another faculty would put a course on a
+    student's profile that every other endpoint then refuses to act on -- leaving
+    the profile as the single place the faculty silo did not hold.
+
+    Validated against `user` as it stands after this request's own edits, so a step
+    that sends a faculty and its first modules together is checked against the
+    faculty being chosen rather than the previous one.
+    """
     if not public_ids:
         return []
     from app.models.course_unit import CourseUnit
 
-    result = await db.execute(
-        select(CourseUnit.id).where(CourseUnit.public_id.in_(public_ids))
+    faculty_scope.require_faculty(user)
+
+    rows = list(
+        (
+            await db.execute(
+                select(CourseUnit).where(CourseUnit.public_id.in_(public_ids))
+            )
+        )
+        .scalars()
+        .all()
     )
-    rows = list(result.scalars())
     if len(rows) != len(public_ids):
         raise NotFoundProblem("One or more course units could not be found.")
-    return rows
+    for unit in rows:
+        faculty_scope.require_own_university(unit, user)
+        faculty_scope.require_own_faculty(unit, user)
+    return [unit.id for unit in rows]
 
 
 __all__ = [

@@ -17,18 +17,17 @@ work at all. That is not hypothetical: `matching_service`, `session_service`,
 return. The help-request flow a student actually performs returned 201 and then
 404'd on the next request, because the row had been rolled back.
 
-These tests use `committed_client`, where each request gets its own session, so
+These tests use `committed_env.client`, where each request gets its own session, so
 an uncommitted write is gone by the time the next request arrives. They assert
 what a real client observes rather than what a fixture makes visible.
 """
 
-from httpx import AsyncClient
-
+from tests.conftest import CommittedEnv
 from tests.support import bearer, complete_profile, first_course_unit, register
 
 
 async def test_a_help_request_survives_the_request_that_created_it(
-    committed_client: AsyncClient,
+    committed_env: CommittedEnv,
 ) -> None:
     """The core loop: ask for help, then ask again in a later request.
 
@@ -36,11 +35,13 @@ async def test_a_help_request_survives_the_request_that_created_it(
     registration not persisted either, this test would fail for a different reason
     and the failure would be much harder to read.
     """
-    student = await register(committed_client, "persistence.student@student.mak.ac.ug")
-    await complete_profile(committed_client, student)
-    course_unit = await first_course_unit(committed_client)
+    course_unit = await first_course_unit(committed_env)
+    student = await register(
+        committed_env.client, "persistence.student@student.mak.ac.ug"
+    )
+    await complete_profile(committed_env.client, student, course_unit=course_unit)
 
-    created = await committed_client.post(
+    created = await committed_env.client.post(
         "/v1/matching/help-requests",
         headers=bearer(student),
         json={
@@ -53,7 +54,7 @@ async def test_a_help_request_survives_the_request_that_created_it(
 
     # A separate request with a separate session, exactly as the app's next
     # screen load would issue it.
-    fetched = await committed_client.get(
+    fetched = await committed_env.client.get(
         f"/v1/matching/help-requests/{request_id}", headers=bearer(student)
     )
     assert fetched.status_code == 200, (
@@ -64,14 +65,16 @@ async def test_a_help_request_survives_the_request_that_created_it(
 
 
 async def test_a_created_help_request_is_listed_back(
-    committed_client: AsyncClient,
+    committed_env: CommittedEnv,
 ) -> None:
     """The same fact, observed the way the student's own list screen sees it."""
-    student = await register(committed_client, "persistence.lister@student.mak.ac.ug")
-    await complete_profile(committed_client, student)
-    course_unit = await first_course_unit(committed_client)
+    course_unit = await first_course_unit(committed_env)
+    student = await register(
+        committed_env.client, "persistence.lister@student.mak.ac.ug"
+    )
+    await complete_profile(committed_env.client, student, course_unit=course_unit)
 
-    created = await committed_client.post(
+    created = await committed_env.client.post(
         "/v1/matching/help-requests",
         headers=bearer(student),
         json={
@@ -81,7 +84,7 @@ async def test_a_created_help_request_is_listed_back(
     )
     assert created.status_code == 201, created.text
 
-    listed = await committed_client.get(
+    listed = await committed_env.client.get(
         "/v1/matching/help-requests/me", headers=bearer(student)
     )
     assert listed.status_code == 200, listed.text

@@ -52,6 +52,7 @@ from app.models.user import User, set_roles
 from app.schemas.matching import MatchRequest
 from app.schemas.session import HelpRequestCreate, SelectTutorRequest, SessionCreate
 from app.services import matching_service, session_service
+from tests.support import sole_faculty_id
 
 GOOD_PASSWORD = "correct horse battery staple"
 
@@ -101,6 +102,7 @@ async def _student(db_session, university, *, email: str = "student@mak.ac.ug") 
         password_hash="hashed-password",
         full_name="Student Example",
         university=university,
+        faculty_id=await sole_faculty_id(db_session, university),
     )
     db_session.add(user)
     await db_session.flush()
@@ -124,6 +126,7 @@ async def _tutor(
         password_hash="hashed-password",
         full_name="Tutor Example",
         university=university,
+        faculty_id=await sole_faculty_id(db_session, university),
     )
     db_session.add(user)
     if profile:
@@ -782,6 +785,7 @@ async def _account(client, db_session, email: str, university: University) -> di
     user = await db_session.scalar(select(User).where(User.email == email))
     assert user is not None
     user.university_id = university.id
+    user.faculty_id = await sole_faculty_id(db_session, university)
     await db_session.commit()
     return response.json()
 

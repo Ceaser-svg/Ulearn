@@ -65,16 +65,17 @@ class TutorRail extends ConsumerWidget {
             onRetry: () => ref.invalidate(topTutorsProvider(courseUnitId)),
           ),
           null => switch (rail.value) {
-            final loaded? => loaded.isEmpty
-                ? const EmptyView(
-                    icon: Icons.school_outlined,
-                    title: 'No tutors to show yet',
-                    message:
-                        'Tutors appear here once they are verified at your '
-                        'university. Nothing is wrong -- there are simply none '
-                        'to recommend yet.',
-                  )
-                : _TutorCards(tutors: loaded),
+            final loaded? =>
+              loaded.isEmpty
+                  ? const EmptyView(
+                      icon: Icons.school_outlined,
+                      title: 'No tutors to show yet',
+                      message:
+                          'Tutors appear here once they are verified in your '
+                          'faculty. Nothing is wrong -- there are simply none '
+                          'to recommend yet.',
+                    )
+                  : _TutorCards(tutors: loaded),
             // Nothing at all while it loads. A rail-shaped hole that fills in a
             // moment later is honest; a spinner over the top of the home screen
             // would stall a dashboard whose other contents are already true.
@@ -101,10 +102,8 @@ class _TutorCards extends StatelessWidget {
         itemCount: tutors.length,
         separatorBuilder: (context, index) =>
             const SizedBox(width: AppDimens.md),
-        itemBuilder: (context, index) => TutorCard(
-          entry: tutors[index],
-          width: _cardWidth,
-        ),
+        itemBuilder: (context, index) =>
+            TutorCard(entry: tutors[index], width: _cardWidth),
       ),
     );
   }
