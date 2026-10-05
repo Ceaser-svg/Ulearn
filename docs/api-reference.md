@@ -302,9 +302,31 @@ earlier step had just saved.
 | `faculty_id`             | UUID \| null  | Public id of a `subject`. See [Faculties are subjects](#faculties-are-subjects). |
 | `year_of_study`          | int \| null   | 1–6.                                                |
 | `academic_data_consented` | bool \| null | `true` records consent. **Never withdraws it.**      |
+| `primary_course_unit_ids` | UUID[] | Each a course unit **inside the caller's own faculty**. `[]` clears them. |
 
 A field is cleared by sending an explicit `null`, which is what makes the partial
 update unambiguous.
+
+**Changing faculty clears the declared course units.** Sending a `faculty_id`
+different from the one stored drops `primary_course_unit_ids` in the same request,
+because those units belong to the old faculty's catalogue and no other endpoint
+would accept them afterwards. A student left holding modules the API refuses to
+act on has a profile that looks complete and silently is not.
+
+**Primary course units are validated against the faculty being set in the same
+request**, not the faculty stored before it. The wizard's second and third steps
+can save together, and validating against the old faculty would reject a correct
+choice.
+
+| Status | `detail`                        | `errors`                          |
+| ------ | ------------------------------- | --------------------------------- |
+| 404    | `One or more course units could not be found.` | Keyed by position. |
+| 422    | `That course unit belongs to a different faculty.` | Keyed by `primary_course_unit_ids`. |
+| 422    | `That course unit does not belong to your university.` | Keyed by `primary_course_unit_ids`. |
+
+A course unit from another faculty is a validation error rather than a 404 on
+purpose: the unit exists, the student simply may not hold it, and saying "could not
+be found" would send them looking for a typo in an id the app never showed them.
 
 `academic_data_consented: true` stamps `academic_data_consented_at` **once** and
 never moves it. Consent cannot be withdrawn through this field: the Uganda Data
@@ -384,22 +406,55 @@ separate from course units, which remain the records used by matching.
 
 ### `GET /v1/academics/course-units`
 
-Course units, optionally narrowed to one faculty. Ordered by university, then by
-code — a student scanning for `BIT 221` is looking for a code, not for
-alphabetical position.
+**Requires authentication.** Returns only the course units inside the caller's own
+university **and** their own faculty. Ordered by university, then by code — a
+student scanning for `BIT 221` is looking for a code, not for alphabetical
+position.
 
 | Query        | Type | Notes                                                     |
 | ------------ | ---- | --------------------------------------------------------- |
 | `subject_id` | UUID | Optional. A faculty **public** id.                       |
+
+The faculty scope is the server's, not the client's. `subject_id` can only ever
+narrow a list that is already inside the caller's own faculty, so a client cannot
+use it to read another faculty's catalogue — asking for one returns `[]`, not that
+faculty's units. An account with no faculty chosen is answered with `[]` too:
+there is nothing to scope to, and an empty list is the honest answer rather than an
+error the student did nothing to cause.
+
+| Status | When                                                            |
+| ------ | --------------------------------------------------------------- |
+| 401    | No token. Onboarding uses this *after* sign-up, so it is always authenticated. |
 
 A malformed `subject_id` is a 422 from FastAPI, not a silently empty list. An
 unrecognised but well-formed one returns `[]`: the client filtered on a value it
 believed exists, and the honest answer to "units in this faculty" is "none". A
 404 would put the wizard into an error state for something the student did not do.
 
+Universities and faculties stay public (see below) because the wizard has to offer
+a choice *before* an account has one of each.
+
 This is the endpoint onboarding's **third** step uses, to record the units a
 student takes. It is not matching: a declared unit is a preference, and nothing
-is matched against it until the matching slice lands.
+is matched against it until the matching slice lands. Four of the six seeded
+faculties publish no course units at all, so an empty list here is the normal
+answer for a real student rather than a fault, and the app must let such a student
+leave onboarding — see [A faculty with no course units](#a-faculty-with-no-course-units).
+
+### A faculty with no course units
+
+A student whose faculty publishes nothing can never declare a primary course
+unit. Every endpoint that depends on declared units must therefore tolerate their
+absence rather than treating it as an incomplete account:
+
+- `PATCH /v1/users/me` accepts `primary_course_unit_ids: []`. An empty list is a
+  request to clear the selection, not a validation error.
+- No endpoint reads a declared unit as a precondition of anything. They are a
+  matching input, and matching already answers honestly for a student who has
+  none.
+- The client must not treat "no declared units" as "onboarding not finished",
+  or the router would return such a student to the wizard on every launch, for
+  ever, with nothing they could do about it.
 
 ### `GET /v1/academics/grades`
 
@@ -454,8 +509,18 @@ merely by opening the screen.
 
 ### `GET /v1/tutors/top`
 
-The discovery rail: tutors at the caller's own university who clear the
+The discovery rail: tutors in the caller's own **faculty** who clear the
 competency bar, most endorsed first.
+
+Two different silos apply, and they are not the same one. Without
+`course_unit_id` the rail is filtered by faculty, so it answers "the tutors in my
+faculty" — a student of Medicine is not offered Computing tutors to browse. With
+`course_unit_id` the rail answers for that one unit, and the competency records
+that make it work are per-unit, so the unit's own faculty governs: a tutor is
+proposed for a unit only if that tutor holds a competency for **that** unit, and a
+competency can only be recorded for a unit the tutor's faculty teaches. Ask for a
+unit outside your own faculty and the answer is `[]`, not a 404: the unit exists,
+it is simply not yours to rail on.
 
 | Query            | Type | Notes                                                                     |
 | ---------------- | ---- | ------------------------------------------------------------------------- |
@@ -480,6 +545,11 @@ Order is endorsement count (desc), then average rating (desc, unrated last), the
 completed sessions (desc), then the displayed name (asc). The name tiebreak is
 what makes the list stable: without it the same screen can reorder itself between
 two paints of the same data.
+
+The rail can legitimately come back empty. Four of the six seeded faculties
+publish no course units, so a student of one has no units to ask about and no
+competencies to match; and a student who names a unit outside their own faculty
+gets `[]` rather than a tutor from a faculty they do not belong to.
 
 `average_rating` is `null` for a tutor with no ratings — absence of evidence, not
 a bad score — and is rounded to two decimal places for display, half-up. Eight
