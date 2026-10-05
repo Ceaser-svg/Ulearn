@@ -65,9 +65,10 @@ class UserProfile {
       academicDataConsentedAt: json['academic_data_consented_at'] == null
           ? null
           : DateTime.parse(json['academic_data_consented_at'] as String),
-      primaryCourseUnitIds: (json['primary_course_unit_ids'] as List<dynamic>? ?? const [])
-          .whereType<String>()
-          .toList(),
+      primaryCourseUnitIds:
+          (json['primary_course_unit_ids'] as List<dynamic>? ?? const [])
+              .whereType<String>()
+              .toList(),
     );
   }
 
@@ -109,13 +110,29 @@ class UserProfile {
 
   /// Whether the wizard still has to run.
   ///
-  /// Three conditions now: name, university (matching requires a grading scale),
-  /// and at least one primary course unit declared (matching has nothing to act
-  /// on without a declared unit).
+  /// Three conditions: name, university (matching requires a grading scale) and
+  /// faculty (the course catalogue and the tutor rail are scoped to it, so
+  /// without one there is nothing to show).
+  ///
+  /// Faculty is listed here because it became a requirement of the API rather
+  /// than a preference: the catalogue answers for one faculty, so an account
+  /// without one is served an empty one and every course screen behind this gate
+  /// looks broken. Choosing a faculty is step two of the wizard, so sending the
+  /// account back through it is a step it already knows how to take.
+  ///
+  /// Primary course units are deliberately NOT a condition here, though the
+  /// wizard asks for one. Four of the six seeded faculties publish no course
+  /// units at all, so a gate that requires a declared unit would send a student
+  /// of one of them back through the wizard on every launch, for ever, with no
+  /// way to satisfy it -- the gate would outlive the thing it was waiting for.
+  /// The module step still asks, and still has to be finished or acknowledged to
+  /// leave the wizard; what it does not do is bar the app to a student who has
+  /// answered it as fully as their faculty allows. Declared units are a matching
+  /// input, and no endpoint reads them as a precondition of anything else.
   bool get needsOnboarding =>
       (fullName == null || fullName!.trim().isEmpty) ||
       universityId == null ||
-      primaryCourseUnitIds.isEmpty;
+      facultyId == null;
 
   /// The part of the name a greeting uses, or null when there is no name.
   ///

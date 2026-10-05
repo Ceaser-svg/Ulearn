@@ -155,6 +155,33 @@ final onboardingControllerProvider =
       OnboardingController.new,
     );
 
+/// Whether the button under the wizard may be pressed right now.
+///
+/// The controller's own `canContinue` covers what the student has typed. This adds
+/// the one case the draft cannot know: a faculty whose catalogue came back empty
+/// has nothing to choose, so the module step must not be able to trap them there.
+/// Four of the six seeded faculties hold no course units, and a Finish button that
+/// stays disabled over an honest empty state is a student who can never reach the
+/// app.
+///
+/// `asData?.value` is `null` while loading and again after a failure. A failed
+/// request is not an empty catalogue, so neither case opens the step: a dropped
+/// connection must not be read as a faculty that teaches nothing.
+final canAdvanceWizardProvider = Provider<bool>((ref) {
+  final state = ref.watch(onboardingControllerProvider);
+  if (state.step != OnboardingStep.primaryModules) return state.canContinue;
+
+  final universityId = state.universityId;
+  final facultyId = state.facultyId;
+  if (universityId == null || facultyId == null) return state.canContinue;
+
+  final units = ref.watch(
+    courseUnitsProvider((universityId: universityId, subjectId: facultyId)),
+  );
+  return state.primaryModuleIds.isNotEmpty ||
+      units.asData?.value.isEmpty == true;
+});
+
 /// Drives the wizard: collects input, saves one step at a time.
 ///
 /// Holds no user profile and does not decide what is valid. It reads what the
@@ -256,8 +283,19 @@ class OnboardingController extends Notifier<OnboardingState> {
   /// Returns whether it advanced. A failure is left to the caller to render, and
   /// the step does not move: telling a student they finished onboarding when the
   /// write failed would drop the step on the next cold start.
-  Future<bool> saveAndAdvance() async {
-    if (!state.canContinue || state.saving) return false;
+  ///
+  /// [facultyHasNoCourseUnits] is passed in by the screen rather than looked up
+  /// here. A controller may not read a provider that depends on itself, and the
+  /// answer -- whether the chosen faculty's catalogue came back empty -- lives in
+  /// the request the screen already watches. It matters only on the module step,
+  /// where it is the difference between a student who can finish and one trapped
+  /// against a list that will never contain anything.
+  Future<bool> saveAndAdvance({bool facultyHasNoCourseUnits = false}) async {
+    final complete =
+        state.canContinue ||
+        (state.step == OnboardingStep.primaryModules &&
+            facultyHasNoCourseUnits);
+    if (!complete || state.saving) return false;
 
     state = state.copyWith(saving: true, clearFailure: true);
     final controller = ref.read(authControllerProvider);

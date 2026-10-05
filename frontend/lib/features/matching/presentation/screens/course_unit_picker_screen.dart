@@ -67,7 +67,11 @@ class _UnitList extends StatelessWidget {
   Widget build(BuildContext context) {
     if (units.isEmpty) {
       // An empty catalogue and a university with no tutors are different facts,
-      // and this one is the first: there is nothing to search for yet.
+      // and this one is the first: there is nothing to search for yet. The
+      // catalogue is scoped to the student's own faculty, so that is the thing
+      // to name -- telling them their university has published nothing would be
+      // wrong whenever a sibling faculty has courses, which is four faculties
+      // out of six in the pilot seed.
       return RefreshIndicator(
         onRefresh: onRefresh,
         child: ListView(
@@ -78,8 +82,9 @@ class _UnitList extends StatelessWidget {
               icon: Icons.menu_book_outlined,
               title: 'No course units to search',
               message:
-                  'Your university has not published a course catalogue yet, so '
-                  'there is nothing to look for a tutor in. This is not an error.',
+                  'Your faculty has not published any course units yet, so '
+                  'there is nothing to look for a tutor in. This is not an '
+                  'error.',
             ),
           ],
         ),

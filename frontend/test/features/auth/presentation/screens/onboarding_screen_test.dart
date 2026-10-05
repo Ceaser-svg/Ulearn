@@ -11,6 +11,7 @@ import 'package:peerpass/features/auth/data/datasources/remote_academics_datasou
 import 'package:peerpass/features/auth/data/models/university_option.dart';
 import 'package:peerpass/features/auth/data/repositories/auth_repository.dart';
 import 'package:peerpass/features/auth/data/repositories/fake_auth_repository.dart';
+import 'package:peerpass/features/auth/presentation/providers/auth_providers.dart';
 import 'package:peerpass/features/auth/presentation/providers/onboarding_providers.dart';
 import 'package:peerpass/features/auth/presentation/screens/onboarding_screen.dart';
 import 'package:peerpass/features/auth/presentation/widgets/selection_check.dart';
@@ -241,6 +242,87 @@ Future<_Harness> _atFilledSecondStep(WidgetTester tester) async {
 }
 
 void main() {
+  testWidgets('a faculty with no course units can still finish the wizard', (
+    tester,
+  ) async {
+    // Four of the six seeded faculties publish no course units, so this is what a
+    // real student of one of them meets on the last step. Two things have to hold
+    // at once: the step has to say what is happening, and it has to let them
+    // leave. A Finish button that stays disabled under an honest empty state
+    // traps the student in the wizard for good, and the router would send them
+    // straight back into it on every launch.
+    final harness = await _atFilledSecondStep(tester);
+    harness.repository.courseUnitOptions = const <CourseUnitOption>[];
+    await _settle(tester);
+    await _tapConsent(tester);
+    await tester.tap(_advanceButton('Continue'));
+    await _settle(tester);
+
+    expect(find.text('No course units yet'), findsOneWidget);
+    expect(
+      find.textContaining('Your faculty has not published any course units'),
+      findsOneWidget,
+    );
+    expect(
+      _canAdvance(tester, 'Finish'),
+      isTrue,
+      reason: 'nothing to choose is not a reason to be unable to finish',
+    );
+
+    await tester.tap(_advanceButton('Finish'));
+    await _settle(tester);
+
+    // Finishing means the request was actually made. A gate that let the button
+    // through and then refused to save would look finished on screen and lose the
+    // step on the next cold start.
+    expect(
+      harness.repository.profileUpdates.last,
+      containsPair('primary_course_unit_ids', isEmpty),
+    );
+    expect(
+      harness.container
+          .read(sessionControllerProvider)
+          .profile
+          ?.needsOnboarding,
+      isFalse,
+      reason:
+          'the router sends a profile that still needs onboarding back here',
+    );
+  });
+
+  testWidgets('a module step whose catalogue failed to load stays closed', (
+    tester,
+  ) async {
+    // The empty state must mean the faculty teaches nothing, not that the request
+    // dropped. A failed catalogue is indistinguishable from an empty one if the
+    // button is derived from data that has not arrived.
+    final harness = _harness(_fake());
+    await _pumpWizard(tester, harness);
+    await _completeNameStep(tester, harness);
+    _chooseUniversity(harness, _university);
+    await tester.pumpAndSettle();
+    await _chooseFacultyAndYear(tester);
+    await tester.tap(_advanceButton('Continue'));
+    await _settle(tester);
+
+    final container = ProviderContainer(
+      overrides: [
+        authRepositoryProvider.overrideWithValue(_fake()),
+        courseUnitsProvider((
+          universityId: _university,
+          subjectId: _faculties.first.publicId,
+        )).overrideWith((ref) => throw const NetworkFailure()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    expect(
+      container.read(canAdvanceWizardProvider),
+      isFalse,
+      reason: 'nothing is known about the catalogue, so nothing is assumed',
+    );
+  });
+
   testWidgets('the first step asks for a name and waits for one', (
     tester,
   ) async {
