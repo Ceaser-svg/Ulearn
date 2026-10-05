@@ -1,21 +1,29 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:peerpass/core/constants/app_dimens.dart';
-import 'package:peerpass/core/error/failures.dart';
 import 'package:peerpass/core/models/academic_fallback.dart';
 import 'package:peerpass/core/models/course_unit_option.dart';
 import 'package:peerpass/core/models/grade_option.dart';
 import 'package:peerpass/core/state/session.dart';
 import 'package:peerpass/features/auth/data/repositories/auth_repository.dart';
-import 'package:peerpass/features/auth/presentation/providers/auth_providers.dart';
-class BecomeTutorScreen extends ConsumerStatefulWidget {
-  const BecomeTutorScreen({super.key});
+import 'package:peerpass/features/competencies/presentation/providers/competency_providers.dart';
+
+/// Submits proof of a grade for one course unit.
+///
+/// Named for what it does rather than what it promises. The old name, "become a
+/// tutor", described an outcome: submitting this form does not make anyone a
+/// tutor. It records a claim that an operator then reviews, and the tutor role is
+/// granted by that review. A screen whose title says "Become a tutor" also
+/// invites the reading that the grade gate is the client's to apply, which is
+/// exactly the rule the API owns.
+class SubmitClaimScreen extends ConsumerStatefulWidget {
+  const SubmitClaimScreen({super.key});
 
   @override
-  ConsumerState<BecomeTutorScreen> createState() => _BecomeTutorScreenState();
+  ConsumerState<SubmitClaimScreen> createState() => _SubmitClaimScreenState();
 }
 
-class _BecomeTutorScreenState extends ConsumerState<BecomeTutorScreen> {
+class _SubmitClaimScreenState extends ConsumerState<SubmitClaimScreen> {
   final TextEditingController _evidenceController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
 
@@ -36,10 +44,10 @@ class _BecomeTutorScreenState extends ConsumerState<BecomeTutorScreen> {
     final profile = ref.watch(sessionControllerProvider).profile;
     final universityId = profile?.universityId ?? '';
     final facultyId = profile?.facultyId;
-    final courseUnitScope = (universityId: universityId, subjectId: facultyId);
-    final courseUnitsAsync = ref.watch(courseUnitsProvider(courseUnitScope));
-    final gradesAsync = ref.watch(gradesProvider(universityId));
-    final universitiesAsync = ref.watch(universitiesProvider);
+    final claimScope = (universityId: universityId, facultyId: facultyId);
+    final courseUnitsAsync = ref.watch(claimCourseUnitsProvider(claimScope));
+    final gradesAsync = ref.watch(claimGradesProvider(universityId));
+    final isMustAsync = ref.watch(isMustUniversityProvider(universityId));
 
     final courseUnits = courseUnitsAsync.maybeWhen(
       data: (items) => items,
@@ -49,17 +57,15 @@ class _BecomeTutorScreenState extends ConsumerState<BecomeTutorScreen> {
       data: (items) => items,
       orElse: () => const <GradeOption>[],
     );
-    final isMust = universitiesAsync.maybeWhen(
-      data: (items) => items.any(
-        (university) =>
-            university.publicId == universityId &&
-            university.name == mustFallbackUniversityName,
-      ),
+    final isMust = isMustAsync.maybeWhen(
+      data: (value) => value,
       orElse: () => false,
     );
-    final grades = liveGrades.isNotEmpty || !isMust
-        ? liveGrades
-        : mustFallbackGrades;
+    // `claimGradesProvider` already substitutes the saved MUST scale when the
+    // live catalogue is empty, so this is the list to render. The `isMust` flag
+    // is now only about what to *say*: whether to admit the grades shown are a
+    // fallback rather than the university's own.
+    final grades = liveGrades;
 
     if (_courseUnitId == null && courseUnits.isNotEmpty) {
       _courseUnitId = courseUnits.first.publicId;
@@ -83,12 +89,12 @@ class _BecomeTutorScreenState extends ConsumerState<BecomeTutorScreen> {
         child: RefreshIndicator(
           onRefresh: () async {
             ref
-              ..invalidate(courseUnitsProvider(courseUnitScope))
-              ..invalidate(gradesProvider(universityId))
-              ..invalidate(universitiesProvider);
+              ..invalidate(claimCourseUnitsProvider(claimScope))
+              ..invalidate(claimGradesProvider(universityId))
+              ..invalidate(isMustUniversityProvider(universityId));
             await Future.wait([
-              ref.read(courseUnitsProvider(courseUnitScope).future),
-              ref.read(gradesProvider(universityId).future),
+              ref.read(claimCourseUnitsProvider(claimScope).future),
+              ref.read(claimGradesProvider(universityId).future),
             ]);
           },
           child: SingleChildScrollView(
@@ -157,18 +163,12 @@ class _BecomeTutorScreenState extends ConsumerState<BecomeTutorScreen> {
                         ? null
                         : (value) => setState(() => _gradeId = value),
                   ),
-                  if (isMust && liveGrades.isEmpty) ...[
+                  if (isMust && grades.isNotEmpty) ...[
                     const SizedBox(height: AppDimens.sm),
                     Text(
                       'Showing the saved MUST grading scale while we refresh the catalogue.',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
-                    if (gradesAsync.hasError)
-                      TextButton(
-                        onPressed: () =>
-                            ref.invalidate(gradesProvider(universityId)),
-                        child: const Text('Retry grades'),
-                      ),
                   ],
                   const SizedBox(height: AppDimens.md),
                   _buildDropdown<String>(
@@ -263,9 +263,9 @@ class _BecomeTutorScreenState extends ConsumerState<BecomeTutorScreen> {
         gradeId = resolved.first.publicId;
       }
 
-      await ref
-          .read(authControllerProvider)
-          .submitTutorProof(
+      final failure = await ref
+          .read(submitClaimProvider)
+          .submit(
             courseUnitId: _courseUnitId!,
             gradeId: gradeId,
             source: _source,
@@ -278,6 +278,17 @@ class _BecomeTutorScreenState extends ConsumerState<BecomeTutorScreen> {
           );
 
       if (!mounted) return;
+      if (failure != null) {
+        // The controller returns the failure rather than throwing, so this branch
+        // and the success one are visibly different: a refusal keeps the tutor on
+        // the form with their answers intact, which matters because the two
+        // refusals they can hit are a duplicate claim and a lost connection, and
+        // neither is fixed by retyping.
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(failure.message)));
+        return;
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -288,17 +299,6 @@ class _BecomeTutorScreenState extends ConsumerState<BecomeTutorScreen> {
       if (context.mounted) {
         Navigator.of(context).pop();
       }
-    } on Failure catch (failure) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(failure.message)));
-    } on Object {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('We could not submit your tutor proof. Try again.'),
-        ),
-      );
     } finally {
       if (mounted) {
         setState(() => _submitting = false);

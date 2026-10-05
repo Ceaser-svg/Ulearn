@@ -53,8 +53,6 @@ class FakeAuthRepository implements AuthRepository {
   final Completer<UserProfile?>? _pendingRestore;
   final TokenStore _tokenStore;
 
-  final List<Map<String, Object?>> submittedCompetencies = [];
-
   /// Every [updateProfile] call, in order.
   ///
   /// A test asserts on this to check what the wizard actually sent, which is the
@@ -122,23 +120,6 @@ class FakeAuthRepository implements AuthRepository {
   @override
   Future<List<GradeOption>> grades({String? universityId}) async =>
       gradeOptions;
-
-  @override
-  Future<void> submitCompetency({
-    required String courseUnitId,
-    required String gradeId,
-    required String source,
-    String? evidenceReference,
-    String? notes,
-  }) async {
-    submittedCompetencies.add({
-      'course_unit_id': courseUnitId,
-      'grade_id': gradeId,
-      'source': source,
-      'evidence_reference': evidenceReference,
-      'notes': notes,
-    });
-  }
 
   @override
   Future<UserProfile> updateProfile({

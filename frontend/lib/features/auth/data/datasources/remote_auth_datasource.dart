@@ -153,25 +153,4 @@ class RemoteAuthDatasource {
     );
     return response.data!;
   }
-
-  /// Submits a tutor capability claim for one course unit.
-  Future<Map<String, dynamic>> submitCompetency({
-    required String courseUnitId,
-    required String gradeId,
-    required String source,
-    String? evidenceReference,
-    String? notes,
-  }) async {
-    final response = await _dio.post<Map<String, dynamic>>(
-      '/v1/competencies',
-      data: {
-        'course_unit_id': courseUnitId,
-        'grade_id': gradeId,
-        'source': source,
-        'evidence_reference': evidenceReference,
-        'notes': notes,
-      },
-    );
-    return response.data!;
-  }
 }

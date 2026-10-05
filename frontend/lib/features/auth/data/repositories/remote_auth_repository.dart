@@ -134,23 +134,6 @@ class RemoteAuthRepository implements AuthRepository {
       _guard(() => academics.grades(universityId: universityId));
 
   @override
-  Future<void> submitCompetency({
-    required String courseUnitId,
-    required String gradeId,
-    required String source,
-    String? evidenceReference,
-    String? notes,
-  }) => _guard(
-    () => auth.submitCompetency(
-      courseUnitId: courseUnitId,
-      gradeId: gradeId,
-      source: source,
-      evidenceReference: evidenceReference,
-      notes: notes,
-    ),
-  );
-
-  @override
   Future<UserProfile> updateProfile({
     String? fullName,
     String? universityId,

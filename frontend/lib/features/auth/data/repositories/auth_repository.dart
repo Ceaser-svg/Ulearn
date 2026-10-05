@@ -58,15 +58,6 @@ abstract interface class AuthRepository {
   /// Every grade on the university's published scale.
   Future<List<GradeOption>> grades({String? universityId});
 
-  /// Submits transcript or portfolio evidence for a unit the user claims to know.
-  Future<void> submitCompetency({
-    required String courseUnitId,
-    required String gradeId,
-    required String source,
-    String? evidenceReference,
-    String? notes,
-  });
-
   /// Updates the caller's own profile, returning the stored record.
   ///
   /// Partial by design. The wizard saves one step at a time, so a step that sent
