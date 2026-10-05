@@ -685,8 +685,11 @@ a unit from another faculty therefore returns `[]` rather than leaking its tutor
 
 ### 7.4b A faculty that publishes nothing is a normal state
 
-Four of the six seeded faculties hold no course units. Everything downstream has to
-answer for that rather than treat it as damage:
+Every faculty the pilot seed publishes is given at least one course unit, because
+a student who picked an empty faculty could not declare a module and would
+therefore be unable to apply to tutor at all. A university whose catalogue is not
+loaded is still an ordinary state, and everything downstream has to answer for it
+rather than treat it as damage:
 
 - `GET /v1/academics/course-units` returns `[]`, and the rail returns `[]`.
 - `PATCH /v1/users/me` accepts `primary_course_unit_ids: []` as a request to clear

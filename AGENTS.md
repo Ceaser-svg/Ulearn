@@ -135,7 +135,7 @@ These are product rules. Breaking them is a bug, not a style issue.
 5. Session records are the source of truth for hours and future certificate eligibility.
 6. Academic data is sensitive: secrets only via environment variables, explicit consent where required, HTTPS in real deployments.
 7. **Faculty scope.** A user's course units belong to their faculty, and so does every record derived from one: declared primary modules, declared competencies, and the tutor rail. The university silo filters (a record outside it is not in the list); the faculty silo *scopes* (the endpoint answers for exactly one faculty, so `GET /v1/academics/course-units` is authenticated while universities and faculties stay public). A tutor's **detail** screen is deliberately cross-faculty to any authenticated user — a student with a direct link must see who they are about to ask. Never let a client-supplied `subject_id` widen a scope the server set.
-8. **A faculty that publishes no course units is a normal state**, not a fault. Four of the six seeded faculties are in it. Declared modules are a matching input and a precondition of *nothing*: never gate an account, a route, or a screen on having declared one, or such a student is locked out permanently.
+8. **A faculty that publishes no course units is a normal state**, not a fault. Every seeded faculty is given at least one unit so no student is locked out of the tutor rail, but the app must still handle a university whose catalogue is not loaded yet. Declared modules are a matching input and a precondition of *nothing*: never gate an account, a route, or a screen on having declared one, or such a student is locked out permanently.
 
 ---
 

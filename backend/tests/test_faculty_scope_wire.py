@@ -29,12 +29,13 @@ from tests.support import (
     register,
 )
 
-# The two faculties the pilot seed gives course units to, and the four it leaves
-# empty. Named in a test rather than derived so that a change to the seed fails
-# here instead of quietly narrowing what is proved.
+# Three faculties the pilot seed publishes units for: the one under test, a second
+# unit-bearing one to prove the silo, and a third that is only ever used as
+# "somewhere else". Named in a test rather than derived so that a change to the
+# seed fails here instead of quietly narrowing what is proved.
 _UNIT_BEARING = "Faculty of Computing and Informatics Sciences"
 _OTHER_UNIT_BEARING = "Faculty of Science"
-_EMPTY = "Faculty of Interdisciplinary Studies"
+_OTHER_FACULTY = "Faculty of Interdisciplinary Studies"
 
 
 async def _public_id(env: CommittedEnv, name: str) -> str:
@@ -110,7 +111,7 @@ async def test_subject_id_cannot_widen_the_scope_the_server_set(
     body = await register(committed_client, "narrowing@must.ac.ug")
     unit = await first_course_unit(committed_env)
     await complete_profile(committed_client, body, course_unit=unit)
-    other_faculty = await _public_id(committed_env, _EMPTY)
+    other_faculty = await _public_id(committed_env, _OTHER_FACULTY)
 
     response = await committed_client.get(
         "/v1/academics/course-units",
@@ -188,7 +189,7 @@ async def test_changing_faculty_drops_the_declared_modules(
     await complete_profile(committed_client, body, course_unit=unit)
     assert unit["id"]
 
-    moved = await _public_id(committed_env, _EMPTY)
+    moved = await _public_id(committed_env, _OTHER_FACULTY)
     response = await committed_client.patch(
         "/v1/users/me", headers=bearer(body), json={"faculty_id": moved}
     )
@@ -292,7 +293,7 @@ async def test_the_catalogue_stays_reachable_after_a_persisted_round_trip(
     body = await register(committed_client, "roundtrip@must.ac.ug")
     unit = await first_course_unit(committed_env)
     await complete_profile(committed_client, body, course_unit=unit)
-    other = await _public_id(committed_env, _EMPTY)
+    other = await _public_id(committed_env, _OTHER_FACULTY)
 
     await committed_client.patch(
         "/v1/users/me", headers=bearer(body), json={"faculty_id": other}

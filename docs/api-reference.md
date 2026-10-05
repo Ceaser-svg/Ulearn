@@ -436,10 +436,11 @@ a choice *before* an account has one of each.
 
 This is the endpoint onboarding's **third** step uses, to record the units a
 student takes. It is not matching: a declared unit is a preference, and nothing
-is matched against it until the matching slice lands. Four of the six seeded
-faculties publish no course units at all, so an empty list here is the normal
-answer for a real student rather than a fault, and the app must let such a student
-leave onboarding — see [A faculty with no course units](#a-faculty-with-no-course-units).
+is matched against it until the matching slice lands. Every seeded faculty
+publishes at least one unit, so this list is empty only for a university whose
+catalogue has not been loaded — which the app must still let such a student
+leave onboarding past — see
+[A faculty with no course units](#a-faculty-with-no-course-units).
 
 ### A faculty with no course units
 
@@ -570,10 +571,11 @@ completed sessions (desc), then the displayed name (asc). The name tiebreak is
 what makes the list stable: without it the same screen can reorder itself between
 two paints of the same data.
 
-The rail can legitimately come back empty. Four of the six seeded faculties
-publish no course units, so a student of one has no units to ask about and no
-competencies to match; and a student who names a unit outside their own faculty
-gets `[]` rather than a tutor from a faculty they do not belong to.
+The rail can legitimately come back empty. A student has no competencies to
+match before they have submitted any proof, and a university whose catalogue is
+not loaded gives them no unit to ask about; and a student who names a unit
+outside their own faculty gets `[]` rather than a tutor from a faculty they do not
+belong to.
 
 `average_rating` is `null` for a tutor with no ratings — absence of evidence, not
 a bad score — and is rounded to two decimal places for display, half-up. Eight
