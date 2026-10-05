@@ -107,7 +107,7 @@ class TutorClaim {
       gradeLabel: gradeLabel,
       statusWire: statusWire,
       status: TutorClaimStatus.fromWire(statusWire),
-      gradePoints: readRequiredDecimal(json, 'grade_points'),
+      gradePoints: readRequiredDecimal(json['grade_points'], 'grade_points'),
       meetsThreshold: json['meets_threshold'] == true,
       createdAt: DateTime.parse(createdAt),
       verifiedAt: _readDateTime(json, 'verified_at'),

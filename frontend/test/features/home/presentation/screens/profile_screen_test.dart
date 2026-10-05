@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
+import 'package:peerpass/app/router.dart';
 import 'package:peerpass/core/error/failures.dart';
 import 'package:peerpass/core/models/subject.dart';
 import 'package:peerpass/core/models/user_profile.dart';
@@ -203,6 +205,53 @@ void main() {
 
     expect(find.text('Choose a university first'), findsOneWidget);
     expect(repository.profileUpdates, isEmpty);
+  });
+
+  testWidgets('the applications row is offered to a student who never applied', (
+    tester,
+  ) async {
+    // Deliberately not gated on the tutor role. The applications screen is how a
+    // student finds out they have not applied yet, so hiding the row until the
+    // API has already made them a tutor would make it unreachable.
+    await _pumpProfile(tester, _repositoryWithFaculties());
+
+    expect(find.text('Tutor applications'), findsOneWidget);
+  });
+
+  testWidgets('tapping the applications row goes to the applications screen', (
+    tester,
+  ) async {
+    final router = GoRouter(
+      initialLocation: '/profile',
+      routes: [
+        GoRoute(path: '/profile', builder: (_, _) => const ProfileScreen()),
+        GoRoute(
+          path: AppRoutes.myApplications,
+          builder: (_, _) => const Scaffold(body: Text('the list')),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+
+    final repository = _repositoryWithFaculties()..session = _profile;
+    final container = ProviderContainer(
+      overrides: [authRepositoryProvider.overrideWithValue(repository)],
+    );
+    addTearDown(container.dispose);
+    container.read(sessionControllerProvider.notifier).signedIn(_profile);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(theme: AppTheme.light, routerConfig: router),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.text('Tutor applications'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('the list'), findsOneWidget);
   });
 }
 

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:peerpass/app/router.dart';
 import 'package:peerpass/core/constants/app_dimens.dart';
 import 'package:peerpass/core/error/failures.dart';
 import 'package:peerpass/core/models/user_profile.dart';
@@ -63,6 +65,21 @@ class ProfileScreen extends ConsumerWidget {
                     leading: const Icon(Icons.badge_outlined),
                     title: const Text('Role'),
                     subtitle: Text(_roleLabel(profile)),
+                  ),
+                  // The tutor-application row lives here rather than on the
+                  // home screen because it is an account fact, and because home
+                  // may not import another feature's presentation: this pushes a
+                  // route instead, which is what the app router exists for.
+                  //
+                  // It is shown to every signed-in user, not only to tutors. A
+                  // student who has not applied yet needs it too -- it is where
+                  // the screen says so and offers the form.
+                  ListTile(
+                    leading: const Icon(Icons.fact_check_outlined),
+                    title: const Text('Tutor applications'),
+                    subtitle: const Text('Where your submitted proofs stand'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => context.push(AppRoutes.myApplications),
                   ),
                 ],
               ),
