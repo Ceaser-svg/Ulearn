@@ -466,6 +466,30 @@ value on that university's scale.
 does not use, and the threshold check would then compare two incompatible
 numbers.
 
+#### Decimals are JSON strings, not numbers
+
+Every `Decimal` on the wire is a **string** — `"grade_points": "5.00"`,
+`"max_points": "5.00"`, `"competency_grade_points": "4.00"`, `"score": "4.50"` —
+never a JSON number.
+
+A JSON number becomes a double in every mainstream client, and a double cannot
+represent every `numeric(6,2)` value, so a number here would be silently rounded
+on its way to a display that only ever shows two places. The string keeps the
+exact value the university recorded.
+
+This is a **contract, not an incidental encoding**. It broke tutor registration
+once already: the Flutter client cast `grade_points` to `num`, the cast raised a
+`TypeError`, and the grades list never loaded, so no tutor could be registered.
+Clients must read these fields through `readDecimal` in
+`frontend/lib/core/models/json_decimal.dart`, which accepts both a string and a
+number so a forward-compatible server change cannot become a dead screen.
+
+`tests/test_academic_wire_shape.py` pins the shape on the server side. Read a
+decimal that is absent with `readDecimal` (null) or `readRequiredDecimal` (a
+`FormatException` the client reports as a server fault) — never with `as num`,
+and never by defaulting a missing grade to zero, which would let a tutor
+register with a grade that fails the bar.
+
 ### `GET /v1/academics/grading-scales`
 
 The scales themselves, including `competency_min_points` — the bar a verified

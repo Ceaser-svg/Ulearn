@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:peerpass/core/models/json_decimal.dart';
 import 'package:peerpass/core/models/tutor_summary.dart';
 
 /// Why a tutor was considered for a course unit and then ruled out.
