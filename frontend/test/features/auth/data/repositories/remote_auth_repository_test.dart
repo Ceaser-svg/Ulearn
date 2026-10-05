@@ -41,11 +41,7 @@ class _FakeServer implements HttpClientAdapter {
   Future<void> Function()? onFetch;
 
   /// Queues one reply. A [DioException] is thrown instead of returned.
-  void reply(
-    int status,
-    Object? body, {
-    Map<String, List<String>>? headers,
-  }) {
+  void reply(int status, Object? body, {Map<String, List<String>>? headers}) {
     _replies.add(_Reply(status, body, headers));
   }
 
@@ -230,7 +226,10 @@ void main() {
       });
 
       await repository
-          .signIn(email: 'student@must.ac.ug', password: 'wrong-but-long-enough')
+          .signIn(
+            email: 'student@must.ac.ug',
+            password: 'wrong-but-long-enough',
+          )
           .then<void>((_) {}, onError: (Object _) {});
 
       expect(await store.readRefreshToken(), isNull);
@@ -238,53 +237,68 @@ void main() {
   });
 
   group('registering', () {
-    test('sends only an email and a password, and gets a nameless student', () async {
-      server.reply(201, _tokens(user: _user(name: 'x', university: null)
-          // A brand-new account has no name at all, so the key is absent.
-        ..remove('full_name')));
+    test(
+      'sends only an email and a password, and gets a nameless student',
+      () async {
+        server.reply(
+          201,
+          _tokens(
+            user: _user(name: 'x', university: null)
+              // A brand-new account has no name at all, so the key is absent.
+              ..remove('full_name'),
+          ),
+        );
 
-      final profile = await repository.register(
-        email: 'newcomer@must.ac.ug',
-        password: 'a-long-enough-password',
-      );
-
-      expect(server.calls.single.path, '/v1/auth/register');
-      expect(
-        server.calls.single.body,
-        {
-          'email': 'newcomer@must.ac.ug',
-          'password': 'a-long-enough-password',
-        },
-        reason: 'a full_name or roles key here would be silently ignored by '
-            'the API, and would look like the client set a name the student '
-            'never gave',
-      );
-      expect(profile.fullName, isNull);
-      expect(profile.needsOnboarding, isTrue);
-    });
-
-    test('a duplicate address surfaces the conflict, not a generic error', () async {
-      server.reply(409, {
-        'status': 409,
-        'detail': 'An account already exists for that email address.',
-      });
-
-      await expectLater(
-        repository.register(
-          email: 'taken@must.ac.ug',
+        final profile = await repository.register(
+          email: 'newcomer@must.ac.ug',
           password: 'a-long-enough-password',
-        ),
-        throwsA(isA<ConflictFailure>()),
-      );
-    });
+        );
+
+        expect(server.calls.single.path, '/v1/auth/register');
+        expect(
+          server.calls.single.body,
+          {
+            'email': 'newcomer@must.ac.ug',
+            'password': 'a-long-enough-password',
+          },
+          reason:
+              'a full_name or roles key here would be silently ignored by '
+              'the API, and would look like the client set a name the student '
+              'never gave',
+        );
+        expect(profile.fullName, isNull);
+        expect(profile.needsOnboarding, isTrue);
+      },
+    );
+
+    test(
+      'a duplicate address surfaces the conflict, not a generic error',
+      () async {
+        server.reply(409, {
+          'status': 409,
+          'detail': 'An account already exists for that email address.',
+        });
+
+        await expectLater(
+          repository.register(
+            email: 'taken@must.ac.ug',
+            password: 'a-long-enough-password',
+          ),
+          throwsA(isA<ConflictFailure>()),
+        );
+      },
+    );
   });
 
   group('restoring on a cold start', () {
-    test('no stored refresh token means signed out, and no request is made', () async {
-      // A launch with nothing stored must not spend a round trip asking.
-      expect(await repository.restoreSession(), isNull);
-      expect(server.calls, isEmpty);
-    });
+    test(
+      'no stored refresh token means signed out, and no request is made',
+      () async {
+        // A launch with nothing stored must not spend a round trip asking.
+        expect(await repository.restoreSession(), isNull);
+        expect(server.calls, isEmpty);
+      },
+    );
 
     test('renews the token, then asks who it belongs to', () async {
       await store.write(accessToken: 'stale', refreshToken: 'refresh-1');
@@ -302,25 +316,30 @@ void main() {
       expect(profile?.email, 'student@must.ac.ug');
     });
 
-    test('the renewed pair replaces the old one, with no stale refresh left', () async {
-      await store.write(accessToken: 'stale', refreshToken: 'refresh-1');
-      server
-        ..reply(200, _tokens(access: 'access-2', refresh: 'refresh-2'))
-        ..reply(200, _user());
+    test(
+      'the renewed pair replaces the old one, with no stale refresh left',
+      () async {
+        await store.write(accessToken: 'stale', refreshToken: 'refresh-1');
+        server
+          ..reply(200, _tokens(access: 'access-2', refresh: 'refresh-2'))
+          ..reply(200, _user());
 
-      await repository.restoreSession();
+        await repository.restoreSession();
 
-      expect(await store.readAccessToken(), 'access-2');
-      expect(await store.readRefreshToken(), 'refresh-2');
-    });
+        expect(await store.readAccessToken(), 'access-2');
+        expect(await store.readRefreshToken(), 'refresh-2');
+      },
+    );
 
-    test('a refresh the server refuses reports signed out and forgets the token',
-        () async {
+    test('a refresh the server refuses reports signed out and forgets the token', () async {
       // The dead credential has to go. Leaving it means every subsequent launch
       // replays a token the server has already revoked, and the student can
       // never get past splash.
       await store.write(accessToken: 'stale', refreshToken: 'revoked');
-      server.reply(401, {'status': 401, 'detail': 'That refresh token is not valid.'});
+      server.reply(401, {
+        'status': 401,
+        'detail': 'That refresh token is not valid.',
+      });
 
       expect(await repository.restoreSession(), isNull);
       expect(await store.readRefreshToken(), isNull);
@@ -350,10 +369,13 @@ void main() {
   });
 
   group('refreshing for a retried request', () {
-    test('no stored token reports false rather than attempting a call', () async {
-      expect(await repository.refreshSession(), isFalse);
-      expect(server.calls, isEmpty);
-    });
+    test(
+      'no stored token reports false rather than attempting a call',
+      () async {
+        expect(await repository.refreshSession(), isFalse);
+        expect(server.calls, isEmpty);
+      },
+    );
 
     test('a successful refresh swaps the pair in', () async {
       await store.write(accessToken: 'stale', refreshToken: 'refresh-1');
@@ -363,21 +385,25 @@ void main() {
       expect(await store.readAccessToken(), 'access-2');
     });
 
-    test('a refused refresh clears the token so nothing retries it forever',
-        () async {
-      await store.write(accessToken: 'stale', refreshToken: 'revoked');
-      server.reply(401, {'status': 401, 'detail': 'nope'});
+    test(
+      'a refused refresh clears the token so nothing retries it forever',
+      () async {
+        await store.write(accessToken: 'stale', refreshToken: 'revoked');
+        server.reply(401, {'status': 401, 'detail': 'nope'});
 
-      expect(await repository.refreshSession(), isFalse);
-      expect(await store.readRefreshToken(), isNull);
-    });
+        expect(await repository.refreshSession(), isFalse);
+        expect(await store.readRefreshToken(), isNull);
+      },
+    );
   });
 
   group('updating the profile', () {
     test('patches the caller own record and returns the stored one', () async {
       server.reply(200, _user());
 
-      final profile = await repository.updateProfile(fullName: 'Achieng Okello');
+      final profile = await repository.updateProfile(
+        fullName: 'Achieng Okello',
+      );
 
       expect(server.calls.single.method, 'PATCH');
       expect(server.calls.single.path, '/v1/users/me');
@@ -385,47 +411,59 @@ void main() {
       expect(profile.fullName, 'Achieng Okello');
     });
 
-    test('sends only the fields supplied, so a step cannot blank a prior one', () async {
-      // The wizard saves one step at a time. A client that sent nulls for the
-      // fields it was not editing would erase the university the student already
-      // chose on the previous screen.
-      server.reply(200, _user());
+    test(
+      'sends only the fields supplied, so a step cannot blank a prior one',
+      () async {
+        // The wizard saves one step at a time. A client that sent nulls for the
+        // fields it was not editing would erase the university the student already
+        // chose on the previous screen.
+        server.reply(200, _user());
 
-      await repository.updateProfile(universityId: 'university-1', yearOfStudy: 3);
+        await repository.updateProfile(
+          universityId: 'university-1',
+          yearOfStudy: 3,
+        );
 
-      expect(server.calls.single.body, {
-        'university_id': 'university-1',
-        'year_of_study': 3,
-      });
-    });
+        expect(server.calls.single.body, {
+          'university_id': 'university-1',
+          'year_of_study': 3,
+        });
+      },
+    );
 
-    test('a rejected field comes back as a validation failure with the reason', () async {
-      server.reply(422, {
-        'status': 422,
-        'detail': 'Some of the details you entered are not valid.',
-        'errors': {'year_of_study': 'Year of study must be between 1 and 6.'},
-      });
+    test(
+      'a rejected field comes back as a validation failure with the reason',
+      () async {
+        server.reply(422, {
+          'status': 422,
+          'detail': 'Some of the details you entered are not valid.',
+          'errors': {'year_of_study': 'Year of study must be between 1 and 6.'},
+        });
 
-      await expectLater(
-        repository.updateProfile(yearOfStudy: 9),
-        throwsA(
-          isA<ValidationFailure>().having(
-            (f) => f.fieldErrors['year_of_study'],
-            'year_of_study reason',
-            'Year of study must be between 1 and 6.',
+        await expectLater(
+          repository.updateProfile(yearOfStudy: 9),
+          throwsA(
+            isA<ValidationFailure>().having(
+              (f) => f.fieldErrors['year_of_study'],
+              'year_of_study reason',
+              'Year of study must be between 1 and 6.',
+            ),
           ),
-        ),
-      );
-    });
+        );
+      },
+    );
 
-    test('an unreadable body is reported as a server fault, not a silent null', () async {
-      server.reply(200, {'unexpected': 'shape'});
+    test(
+      'an unreadable body is reported as a server fault, not a silent null',
+      () async {
+        server.reply(200, {'unexpected': 'shape'});
 
-      await expectLater(
-        repository.updateProfile(fullName: 'Achieng'),
-        throwsA(isA<ServerFailure>()),
-      );
-    });
+        await expectLater(
+          repository.updateProfile(fullName: 'Achieng'),
+          throwsA(isA<ServerFailure>()),
+        );
+      },
+    );
   });
 
   group('signing out', () {
@@ -488,35 +526,45 @@ void main() {
       expect(await store.readRefreshToken(), isNull);
     });
 
-    test('a refused delete keeps the session, so a retry is still possible',
-        () async {
-      // What the screen offers when it says "your account is unchanged, try
-      // again" has to be true. Signing out on the way past is what turned a
-      // failed delete into a dead end.
-      await store.write(accessToken: 'access-1', refreshToken: 'refresh-1');
-      server.reply(500, {'status': 500, 'detail': 'could not reach the store'});
+    test(
+      'a refused delete keeps the session, so a retry is still possible',
+      () async {
+        // What the screen offers when it says "your account is unchanged, try
+        // again" has to be true. Signing out on the way past is what turned a
+        // failed delete into a dead end.
+        await store.write(accessToken: 'access-1', refreshToken: 'refresh-1');
+        server.reply(500, {
+          'status': 500,
+          'detail': 'could not reach the store',
+        });
 
-      await expectLater(repository.deleteAccount(), throwsA(isA<Failure>()));
+        await expectLater(repository.deleteAccount(), throwsA(isA<Failure>()));
 
-      expect(await store.readAccessToken(), 'access-1');
-      expect(await store.readRefreshToken(), 'refresh-1');
-    });
+        expect(await store.readAccessToken(), 'access-1');
+        expect(await store.readRefreshToken(), 'refresh-1');
+      },
+    );
 
-    test('an unauthorised delete keeps the tokens rather than signing out',
-        () async {
-      // The specific failure that was reported. Even when the server refuses,
-      // throwing away the credentials leaves the user with no way back in and
-      // an account they were told was not deleted.
-      await store.write(accessToken: 'access-1', refreshToken: 'refresh-1');
-      server.reply(401, {'status': 401, 'detail': 'Could not validate credentials'});
+    test(
+      'an unauthorised delete keeps the tokens rather than signing out',
+      () async {
+        // The specific failure that was reported. Even when the server refuses,
+        // throwing away the credentials leaves the user with no way back in and
+        // an account they were told was not deleted.
+        await store.write(accessToken: 'access-1', refreshToken: 'refresh-1');
+        server.reply(401, {
+          'status': 401,
+          'detail': 'Could not validate credentials',
+        });
 
-      await expectLater(
-        repository.deleteAccount(),
-        throwsA(isA<AuthFailure>()),
-      );
+        await expectLater(
+          repository.deleteAccount(),
+          throwsA(isA<AuthFailure>()),
+        );
 
-      expect(await store.readAccessToken(), 'access-1');
-    });
+        expect(await store.readAccessToken(), 'access-1');
+      },
+    );
   });
 
   group('academic lookups', () {
@@ -541,11 +589,103 @@ void main() {
         {'id': 'subject-1', 'name': 'School of Business and Management'},
       ]);
 
-      final faculties = await repository.faculties(universityId: 'university-1');
+      final faculties = await repository.faculties(
+        universityId: 'university-1',
+      );
 
       expect(server.calls.single.path, '/v1/academics/faculties');
       expect(server.calls.single.query, {'university_id': 'university-1'});
       expect(faculties.single.name, 'School of Business and Management');
+    });
+
+    // The grades reply below is the body the API actually sends, decimals
+    // included. It is written out literally rather than built from a helper
+    // because the bug it guards is a disagreement between two representations
+    // of the same field: a fixture that produced `5.0` would have kept the
+    // broken cast passing.
+    test('reads the grades whose points arrive as JSON strings', () async {
+      server.reply(200, [
+        {
+          'id': 'grade-a',
+          'label': 'A',
+          'grade_points': '5.00',
+          'max_points': '5.00',
+          'grading_scale_id': 'scale-1',
+        },
+        {
+          'id': 'grade-b-plus',
+          'label': 'B+',
+          'grade_points': '4.50',
+          'max_points': '5.00',
+          'grading_scale_id': 'scale-1',
+        },
+      ]);
+
+      final grades = await repository.grades(universityId: 'university-1');
+
+      expect(server.calls.single.path, '/v1/academics/grades');
+      expect(server.calls.single.query, {'university_id': 'university-1'});
+      expect(grades.map((grade) => grade.publicId), [
+        'grade-a',
+        'grade-b-plus',
+      ]);
+      expect(grades.first.label, 'A');
+      expect(grades.first.gradePoints, 5.0);
+      expect(grades.last.gradePoints, 4.5);
+    });
+
+    test('still reads grades sent as JSON numbers', () async {
+      server.reply(200, [
+        {'id': 'grade-a', 'label': 'A', 'grade_points': 5.0},
+      ]);
+
+      final grades = await repository.grades(universityId: 'university-1');
+
+      expect(grades.single.gradePoints, 5.0);
+    });
+
+    test('reports an unreadable grade body as a server fault', () async {
+      server.reply(200, [
+        {'id': 'grade-a', 'label': 'A'},
+      ]);
+
+      await expectLater(
+        repository.grades(universityId: 'university-1'),
+        throwsA(
+          isA<ServerFailure>().having(
+            (failure) => failure.message,
+            'message',
+            'The server sent something we could not read.',
+          ),
+        ),
+      );
+    });
+
+    test('reads the course units for a faculty', () async {
+      server.reply(200, [
+        {
+          'id': 'unit-1',
+          'code': 'BIT 221',
+          'name': 'Operating Systems',
+          'description': null,
+          'university_id': 'university-1',
+          'subject_id': 'subject-1',
+          'grade_id': null,
+        },
+      ]);
+
+      final units = await repository.courseUnits(
+        universityId: 'university-1',
+        subjectId: 'subject-1',
+      );
+
+      expect(server.calls.single.path, '/v1/academics/course-units');
+      expect(server.calls.single.query, {
+        'university_id': 'university-1',
+        'subject_id': 'subject-1',
+      });
+      expect(units.single.code, 'BIT 221');
+      expect(units.single.name, 'Operating Systems');
     });
   });
 }

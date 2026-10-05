@@ -7,11 +7,11 @@ It is not a complete MUST curriculum and does not represent institutional
 approval. The pilot must not advertise a unit as available until MUST confirms
 the launch list and participating tutor cohort.
 
-The seed currently exposes only the six existing course-unit records below.
-They are the initial technical candidates because they have real unit codes and
-names in the repository. Programme names are not converted into course units:
-a programme such as Computer Science is a degree programme, while a course unit
-such as BIT 221 is a matchable learning unit.
+Every faculty the seed publishes carries at least one course unit. That is a
+product requirement, not tidiness: a student can only declare a primary module
+that exists, a declared module is the only route to the tutor rail, and applying
+to tutor needs a unit to submit proof against. A faculty with an empty catalogue
+would lock out every student who chose it, and the app could not tell them so.
 
 ## Provisional launch candidates
 
@@ -23,39 +23,74 @@ such as BIT 221 is a matchable learning unit.
 | Faculty of Science | SCH 211 | Organic Chemistry |
 | Faculty of Science | PHY 212 | Thermodynamics |
 | Faculty of Science | MTH 213 | Linear Algebra |
+| Faculty of Medicine | MED 211 | Human Anatomy |
+| Faculty of Medicine | MED 212 | Human Physiology |
+| Faculty of Medicine | MED 213 | Medical Biochemistry |
+| Faculty of Applied Sciences and Technology | AST 211 | Electrical Circuits |
+| Faculty of Applied Sciences and Technology | AST 212 | Electronics |
+| Faculty of Applied Sciences and Technology | AST 213 | Engineering Drawing |
+| Faculty of Business and Management Sciences | BMS 211 | Financial Accounting |
+| Faculty of Business and Management Sciences | BMS 212 | Principles of Economics |
+| Faculty of Business and Management Sciences | BMS 213 | Entrepreneurship |
+| Faculty of Interdisciplinary Studies | IDS 211 | Planning and Governance |
+| Faculty of Interdisciplinary Studies | IDS 212 | Human Development and Relational Sciences |
+| Faculty of Interdisciplinary Studies | IDS 213 | Community Engagement and Service Learning |
 
-## Faculties with no course units
+### The first six rows are placeholders
 
-Six faculties are seeded and only two of them — Computing and Informatics
-Sciences, and Science — publish any course units. The other four are present so
-that a student can choose the faculty they actually study in, and they answer
-with nothing:
+`BIT 221`, `SCH 211`, `PHY 212` and `MTH 213` are pre-existing seed entries that
+have no institutional source either. They were written before any MUST data was
+available and exist only to give the matching and tutor flows something to
+exercise. Treat them as placeholders on the same footing as the twelve rows below.
 
-| Faculty | Course units |
-| --- | --- |
-| Faculty of Applied Sciences and Technology | none seeded |
-| Faculty of Interdisciplinary Studies | none seeded |
-| Faculty of Business and Management Sciences | none seeded |
-| Faculty of Medicine | none seeded |
+### Where the twelve new rows come from
 
-This is a normal state for the pilot, not a data fault, and the app is built for
-it. For a student of one of these faculties:
+**MUST does not publish a course-unit catalogue.** `must.ac.ug` programme pages
+carry faculty, course code, duration, fees and entry requirements, but their
+"Course Modules" tab is empty, and no module list is published anywhere public.
+There was therefore no official code to copy, and **every code in this table is
+provisional** — a faculty prefix plus a three-digit number following the existing
+`BIT 221` shape, not a MUST course code.
 
-- `GET /v1/academics/course-units` returns `[]`.
-- The tutor rail returns `[]` — there are no units, so there is nothing to match
-  and no tutor holds a competency for a unit these faculties do not teach.
+The *names* are sourced, and taken from MUST's own academic units — the
+departments each faculty page lists — rather than from programme names. A
+department is a real, verifiable academic unit and its subject areas are what its
+early courses teach; a degree programme is not a course unit.
+
+| Faculty | Source | Departments taken from |
+| --- | --- | --- |
+| Faculty of Medicine | `must.ac.ug/university_unit/faculty-of-medicine`, and its Biochemistry department page, which states biochemistry is "a mandatory course for all students in the faculty" | Anatomy, Physiology, Biochemistry |
+| Faculty of Applied Sciences and Technology | `must.ac.ug/university_unit/faculty-of-applied-sciences-and-technology`, plus the BEEE programme page whose entry requirements name Technical Drawing | Department of Electrical and Electronic Engineering |
+| Faculty of Business and Management Sciences | `must.ac.ug/university_unit/faculty-of-business-and-management-sciences` | Department of Accounting and Finance; Department of Economics and Entrepreneurship |
+| Faculty of Interdisciplinary Studies | `must.ac.ug/university_unit/faculty-of-interdisciplinary-studies` | Department of Planning and Governance; Department of Human Development and Relational Sciences; Department of Community Engagement and Service Learning |
+
+Retrieved for this seed. When MUST supplies the real catalogue, replace the whole
+table: nothing outside `backend/app/db/seed.py` encodes a code or a name.
+
+### Faculty naming drift, not corrected here
+
+MUST's own site now calls this faculty **"Faculty of Health Sciences"** (its URL
+still says `faculty-of-medicine`) and lists a seventh faculty, **Agriculture,
+Environment and Veterinary Sciences (FAEVS)**, which the seed does not have. The
+seed keeps the older names: renaming a seeded faculty would orphan every course
+unit, declared module and competency keyed to it. Reconciling this is a
+migration and a product decision, not a seed edit — raise it before launch.
+
+## A university whose catalogue is not loaded
+
+Every *seeded* faculty has a unit now, but a university publishing none is still
+an ordinary state, and the app is built for it:
+
+- `GET /v1/academics/course-units` returns `[]`, and the tutor rail returns `[]`.
 - Onboarding still completes. The module step explains that the faculty has
   published nothing and lets the student finish with nothing chosen, because a
   gate that required a declared unit would return such a student to the wizard on
   every launch, for ever, with nothing they could do about it.
 
-A student cannot reach the app by picking a faculty with no units; the four rows
-are there so the picker offers the faculty the student actually belongs to rather
-than only the two that happen to have content.
-
-Before launch, MUST operations must supply the units for these faculties, or the
-pilot has no launch list for a large share of its own students. That is item 1 of
-the process below and it applies to every faculty, not just this table.
+This is covered by staging a second university with no units
+(`test_a_faculty_with_no_course_units_is_offered_none`) rather than by leaving a
+seeded faculty empty, and by `test_every_seeded_faculty_offers_at_least_one_unit`,
+which fails if a faculty is added without a unit.
 
 ## Approval and change process
 
@@ -65,9 +100,23 @@ Before pilot invitations are issued, MUST operations must provide:
 2. The academic owner or source for each listed unit.
 3. The initial tutor cohort and the units each tutor may support.
 
-Engineering may update the seed with confirmed units, but must not invent unit
-codes or infer them from faculty/programme descriptions. Any unconfirmed row
-must remain clearly provisional or be removed from the launch seed.
+### On invented codes
+
+Engineering must not invent a course code and present it as a real one. Two
+provisional uses are allowed, and both must stay labelled as such in
+`backend/app/db/seed.py`:
+
+- **A placeholder** for a unit no data exists for, so that a feature has
+  something to exercise. `BIT 221` and the Science rows are these.
+- **A provisional code with a sourced name**, as the twelve Medicine, FAST,
+  business and interdisciplinary rows are. The *name* is taken from a real MUST
+  department because that is verifiable today; the *code* has no source because
+  MUST publishes none, so it is labelled provisional rather than guessed at.
+
+What is not allowed is a code that reads as authoritative. When MUST supplies the
+real catalogue, replace the table wholesale. Any row that has not been confirmed
+by MUST must keep its provisional marking in the seed, and must not be advertised
+as available in the pilot.
 
 The source of this data is `backend/app/db/seed.py`; running
 `python -m app.db.seed` is idempotent and does not remove existing rows.

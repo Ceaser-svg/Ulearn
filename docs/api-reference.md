@@ -436,10 +436,11 @@ a choice *before* an account has one of each.
 
 This is the endpoint onboarding's **third** step uses, to record the units a
 student takes. It is not matching: a declared unit is a preference, and nothing
-is matched against it until the matching slice lands. Four of the six seeded
-faculties publish no course units at all, so an empty list here is the normal
-answer for a real student rather than a fault, and the app must let such a student
-leave onboarding — see [A faculty with no course units](#a-faculty-with-no-course-units).
+is matched against it until the matching slice lands. Every seeded faculty
+publishes at least one unit, so this list is empty only for a university whose
+catalogue has not been loaded — which the app must still let such a student
+leave onboarding past — see
+[A faculty with no course units](#a-faculty-with-no-course-units).
 
 ### A faculty with no course units
 
@@ -465,6 +466,30 @@ value on that university's scale.
 `grade_points` directly would let a tutor claim an A on a scale their university
 does not use, and the threshold check would then compare two incompatible
 numbers.
+
+#### Decimals are JSON strings, not numbers
+
+Every `Decimal` on the wire is a **string** — `"grade_points": "5.00"`,
+`"max_points": "5.00"`, `"competency_grade_points": "4.00"`, `"score": "4.50"` —
+never a JSON number.
+
+A JSON number becomes a double in every mainstream client, and a double cannot
+represent every `numeric(6,2)` value, so a number here would be silently rounded
+on its way to a display that only ever shows two places. The string keeps the
+exact value the university recorded.
+
+This is a **contract, not an incidental encoding**. It broke tutor registration
+once already: the Flutter client cast `grade_points` to `num`, the cast raised a
+`TypeError`, and the grades list never loaded, so no tutor could be registered.
+Clients must read these fields through `readDecimal` in
+`frontend/lib/core/models/json_decimal.dart`, which accepts both a string and a
+number so a forward-compatible server change cannot become a dead screen.
+
+`tests/test_academic_wire_shape.py` pins the shape on the server side. Read a
+decimal that is absent with `readDecimal` (null) or `readRequiredDecimal` (a
+`FormatException` the client reports as a server fault) — never with `as num`,
+and never by defaulting a missing grade to zero, which would let a tutor
+register with a grade that fails the bar.
 
 ### `GET /v1/academics/grading-scales`
 
@@ -546,10 +571,11 @@ completed sessions (desc), then the displayed name (asc). The name tiebreak is
 what makes the list stable: without it the same screen can reorder itself between
 two paints of the same data.
 
-The rail can legitimately come back empty. Four of the six seeded faculties
-publish no course units, so a student of one has no units to ask about and no
-competencies to match; and a student who names a unit outside their own faculty
-gets `[]` rather than a tutor from a faculty they do not belong to.
+The rail can legitimately come back empty. A student has no competencies to
+match before they have submitted any proof, and a university whose catalogue is
+not loaded gives them no unit to ask about; and a student who names a unit
+outside their own faculty gets `[]` rather than a tutor from a faculty they do not
+belong to.
 
 `average_rating` is `null` for a tutor with no ratings — absence of evidence, not
 a bad score — and is rounded to two decimal places for display, half-up. Eight

@@ -184,9 +184,43 @@ PROGRAMS: tuple[tuple[str, str, str], ...] = (
 #: The provisional MUST pilot catalogue: `(faculty, code, name)`.
 #:
 #: These are the only units currently eligible for the closed pilot. They are
-#: existing verified seed entries, not an institutional endorsement or a claim
-#: that MUST's full catalogue has been loaded. Do not derive more units from
-#: programme names: programmes and matchable course units are different records.
+#: seed entries, not an institutional endorsement or a claim that MUST's full
+#: catalogue has been loaded. Do not derive more units from programme names:
+#: programmes and matchable course units are different records.
+#:
+#: Every faculty MUST publishes has at least one unit here. A faculty with an
+#: empty catalogue cannot be declared against, so a student in one could never
+#: apply to tutor -- the pilot would look like a broken feature rather than an
+#: empty one. `tests/test_cli.py` fails if a faculty is added without a unit.
+#:
+#: **The codes are provisional and are not MUST course codes.** MUST does not
+#: publish a course-unit catalogue: `must.ac.ug` programme pages carry faculty,
+#: course code, duration and entry requirements, but their "Course Modules" tab
+#: is empty, and no module list is published anywhere public. The names below
+#: are drawn from MUST's own academic units -- the departments listed on each
+#: faculty page -- because a department is a real, verifiable academic unit
+#: where a programme name is not, and its subject areas are what its first-year
+#: courses teach. Replace the whole table with the official catalogue when MUST
+#: supplies one; nothing else in the codebase encodes a code or a name.
+#:
+#: Sources, retrieved for this seed:
+#:
+#: * `must.ac.ug/university_unit/faculty-of-medicine` and its Biochemistry
+#:   department page, which states biochemistry is "a mandatory course for all
+#:   students in the faculty".
+#: * `must.ac.ug/university_unit/faculty-of-applied-sciences-and-technology`,
+#:   which lists the Department of Electrical and Electronic Engineering, and the
+#:   BEEE programme page, whose entry requirements name Technical Drawing.
+#: * `must.ac.ug/university_unit/faculty-of-business-and-management-sciences`,
+#:   which lists the Departments of Accounting and Finance and of Economics and
+#:   Entrepreneurship.
+#: * `must.ac.ug/university_unit/faculty-of-interdisciplinary-studies`, which
+#:   lists its four departments by name.
+#:
+#: Note that MUST's own site now calls this faculty "Faculty of Health Sciences"
+#: and lists a seventh faculty, Agriculture, Environment and Veterinary Sciences.
+#: The seed keeps the older names because renaming a seeded faculty would orphan
+#: every course unit, declared module and competency keyed to it.
 COURSE_UNITS: tuple[tuple[str, str, str], ...] = (
     ("Faculty of Computing and Informatics Sciences", "BIT 221", "Operating Systems"),
     (
@@ -198,6 +232,34 @@ COURSE_UNITS: tuple[tuple[str, str, str], ...] = (
     ("Faculty of Science", "SCH 211", "Organic Chemistry"),
     ("Faculty of Science", "PHY 212", "Thermodynamics"),
     ("Faculty of Science", "MTH 213", "Linear Algebra"),
+    ("Faculty of Medicine", "MED 211", "Human Anatomy"),
+    ("Faculty of Medicine", "MED 212", "Human Physiology"),
+    ("Faculty of Medicine", "MED 213", "Medical Biochemistry"),
+    ("Faculty of Applied Sciences and Technology", "AST 211", "Electrical Circuits"),
+    ("Faculty of Applied Sciences and Technology", "AST 212", "Electronics"),
+    ("Faculty of Applied Sciences and Technology", "AST 213", "Engineering Drawing"),
+    ("Faculty of Business and Management Sciences", "BMS 211", "Financial Accounting"),
+    (
+        "Faculty of Business and Management Sciences",
+        "BMS 212",
+        "Principles of Economics",
+    ),
+    (
+        "Faculty of Business and Management Sciences",
+        "BMS 213",
+        "Entrepreneurship",
+    ),
+    ("Faculty of Interdisciplinary Studies", "IDS 211", "Planning and Governance"),
+    (
+        "Faculty of Interdisciplinary Studies",
+        "IDS 212",
+        "Human Development and Relational Sciences",
+    ),
+    (
+        "Faculty of Interdisciplinary Studies",
+        "IDS 213",
+        "Community Engagement and Service Learning",
+    ),
 )
 
 

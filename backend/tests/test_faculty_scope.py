@@ -8,9 +8,11 @@ each test names the surface it is about instead of asserting that a 422 happened
 somewhere.
 
 The fixture reads the seeded pilot rather than building a parallel world, so these
-tests describe the catalogue the product actually ships -- including the fact that
-four of its six faculties hold no course units at all, which is the empty state a
-real student hits first.
+tests describe the catalogue the product actually ships -- including the rule that
+every faculty it ships has a course unit, without which a student who picks one
+could never apply to tutor. The empty-catalogue case is therefore staged rather
+than taken from the seed: a university whose units are not loaded yet is ordinary,
+and the rule under test is how the app answers one.
 
 Two faculties of one university is the whole setup. A second *university* would not
 test the silo, it would re-test the boundary that already existed: the interesting
@@ -24,7 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.models.competency import Competency
-from app.models.course_unit import CourseUnit, Subject
+from app.models.course_unit import CourseUnit, Subject, University
 from app.models.enums import (
     CompetencyStatus,
     TutorStanding,
@@ -41,7 +43,6 @@ UNITS_URL = "/v1/academics/course-units"
 
 OWN_FACULTY = "Faculty of Computing and Informatics Sciences"
 OTHER_FACULTY = "Faculty of Science"
-EMPTY_FACULTY = "Faculty of Medicine"
 OWN_UNIT_CODE = "BIT 221"
 OTHER_UNIT_CODE = "SCH 211"
 
@@ -83,7 +84,6 @@ async def pilot(committed_env: CommittedEnv) -> dict:
     return {
         "own": subjects[OWN_FACULTY],
         "other": subjects[OTHER_FACULTY],
-        "empty": subjects[EMPTY_FACULTY],
         "own_unit": units[OWN_UNIT_CODE],
         "other_unit": units[OTHER_UNIT_CODE],
         "grade": grade,
@@ -190,18 +190,73 @@ async def test_a_faculty_with_no_course_units_is_offered_none(
 ) -> None:
     """The other direction, and the one a student actually hits first.
 
-    Medicine is one of four seeded faculties holding no units. The answer has to
-    be an empty list the client can render as an empty state: a 404, or a refusal,
-    would put a new student into an error screen over a fact about the catalogue
-    rather than about them.
-    """
-    body, _ = await _in_faculty(
-        committed_env, pilot, pilot["empty"], "med.student@must.ac.ug"
-    )
+    A faculty with no published units has to answer with an empty list the client
+    can render as an empty state: a 404, or a refusal, would put a new student
+    into an error screen over a fact about the catalogue rather than about them.
 
-    units = (await committed_env.client.get(UNITS_URL, headers=bearer(body))).json()
+    The state is staged rather than taken from the pilot seed on purpose. Every
+    faculty MUST publishes now carries at least one unit, which is what stops a
+    student there from being unable to apply to tutor at all -- but the rule is
+    about how the app *answers*, not about what MUST happens to publish. A
+    university whose catalogue is not loaded yet is ordinary, so it is built here
+    rather than asserted of a faculty that now has a catalogue.
+    """
+    client = committed_env.client
+    async with committed_env.session() as session:
+        university = University(name="University With No Catalogue Yet")
+        session.add(university)
+        await session.flush()
+        faculty = Subject(name="Its Only Faculty", university=university)
+        session.add(faculty)
+        await session.commit()
+        faculty_id = str(faculty.public_id)
+        university_id = str(university.public_id)
+
+    body = await register(client, "thin.catalogue@must.ac.ug")
+    response = await client.patch(
+        "/v1/users/me",
+        headers=bearer(body),
+        json={
+            "full_name": "Thin Catalogue",
+            "university_id": university_id,
+            "faculty_id": faculty_id,
+            "academic_data_consented": True,
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    units = (await client.get(UNITS_URL, headers=bearer(body))).json()
 
     assert units == []
+
+
+async def test_every_seeded_faculty_offers_at_least_one_unit(
+    committed_env: CommittedEnv,
+) -> None:
+    """No seeded faculty may be left without a course unit.
+
+    A student can only declare a primary module that exists, and a declared module
+    is the only route to the tutor rail. A faculty with an empty catalogue is
+    therefore not a cosmetic gap: it locks out every student who picks it, and
+    the app has no way to tell them so. This is why the rule that an empty
+    catalogue must not *gate* anything is not a substitute for filling it.
+    """
+    async with committed_env.session() as session:
+        faculties = (
+            (
+                await session.execute(
+                    select(Subject).options(selectinload(Subject.course_units))
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert faculties, "the seed must publish faculties"
+
+    without = sorted(faculty.name for faculty in faculties if not faculty.course_units)
+
+    assert not without, f"faculties with no course unit: {without}"
 
 
 async def test_an_account_with_no_faculty_is_offered_no_courses(

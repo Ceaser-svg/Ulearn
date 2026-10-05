@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:peerpass/core/models/json_decimal.dart';
 import 'package:peerpass/core/models/tutor_standing.dart';
 
 /// The tutor fields a student is allowed to see.
@@ -126,29 +127,6 @@ class TutorSummary {
 
   @override
   String toString() => 'TutorSummary($userId, $standingWire)';
-}
-
-/// Reads a decimal the API sends as a JSON string.
-///
-/// `Decimal` is serialised as `"4.10"`, not `4.1`, and that is deliberate on
-/// the server: a JSON number becomes a double on this side, and a double cannot
-/// represent every `numeric(6,2)` value, so a value would be silently rounded
-/// on its way to a client that was going to display it only. A number is still
-/// accepted, because the same read is used on a field that is *not* a
-/// `Decimal` (`score` is a real JSON number) and because a client that broke on
-/// a numeric would turn a forward-compatible server change into a dead screen.
-///
-/// Null stays null rather than becoming a zero, and a string that will not
-/// parse is read as absent rather than refused: the displayed number is not
-/// worth failing a rail over, and an unreadable one is already better shown as
-/// "No ratings yet" than as a `FormatException`. A value that is neither a
-/// string nor a number *is* a `FormatException`, because that is a shape the
-/// API documents and does not produce.
-double? readDecimal(Object? value) {
-  if (value == null) return null;
-  if (value is num) return value.toDouble();
-  if (value is String) return double.tryParse(value);
-  throw const FormatException('expected a decimal the API sends as a string');
 }
 
 /// A string field, treating an empty one as absent.

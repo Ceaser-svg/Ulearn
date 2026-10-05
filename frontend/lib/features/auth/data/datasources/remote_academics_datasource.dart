@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:peerpass/core/models/json_decimal.dart';
 import 'package:peerpass/core/models/subject.dart';
 import 'package:peerpass/features/auth/data/models/university_option.dart';
 
@@ -114,7 +115,7 @@ class GradeOption {
   factory GradeOption.fromJson(Map<String, dynamic> json) => GradeOption(
     publicId: json['id'] as String,
     label: json['label'] as String,
-    gradePoints: (json['grade_points'] as num).toDouble(),
+    gradePoints: readRequiredDecimal(json['grade_points'], 'grade_points'),
   );
 
   final String publicId;
