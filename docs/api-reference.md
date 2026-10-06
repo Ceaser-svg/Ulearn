@@ -45,11 +45,33 @@ creation time. It never returns password hashes, refresh tokens, consent
 timestamps, competency evidence, or internal database ids.
 
 `GET /v1/admin/audit-events` returns the append-only audit events created by
-privileged actions. Audit context contains only action-specific identifiers and
-pagination metadata; request bodies, credentials, and evidence are not stored.
+privileged actions. Each event carries the actor's `actor_id`, `actor_email`, and
+`actor_name`, so an auditor can answer "who did this" from the log alone rather
+than by joining against the users list; `actor_name` falls back to `actor_email`
+for a staff account registered without a full name. Audit context contains only
+action-specific identifiers and pagination metadata; request bodies, credentials,
+and evidence are not stored.
 
 `GET /v1/admin/competencies` returns paginated competency claims for operational
-review. `PATCH /v1/admin/competencies/{competency_id}/review` accepts
+review. Each row carries the decision context rather than leaving it to be looked
+up: `grade_label`, `grade_points`, `competency_min_points` (the bar for that
+university's scale), the server's own `meets_threshold` verdict, `status`,
+`rejection_reason` when the last review refused it, `created_at`, and `verified_at`
+when it has been verified. `meets_threshold` is `false` for a `pending` or
+`rejected` claim and `true` only once verified, and it is `false` when the
+university has no grading scale loaded, because nothing can be verified on a scale
+that does not exist. The bar is omitted for such a university rather than sent as
+a value to compare against. A verified competency carries no `rejection_reason`;
+a claim holds one status or the other.
+
+| Query     | Type   | Notes                                                                                            |
+| --------- | ------ | ------------------------------------------------------------------------------------------------ |
+| `status`  | string | Optional. `pending`, `rejected`, or `verified`. Omitted means every status. Anything else is a 422. |
+
+Filtering is applied by the API rather than by the client, so `total` and every
+page describe the filter that was asked for.
+
+`PATCH /v1/admin/competencies/{competency_id}/review` accepts
 `{"status": "verified"}` or `{"status": "rejected", "rejection_reason": "..."}`.
 Only `pending` claims can be reviewed; rejection reasons must be nonblank.
 Successful decisions record the reviewer in the competency and append an audit

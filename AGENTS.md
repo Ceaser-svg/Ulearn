@@ -317,6 +317,19 @@ flutter test
 
 Both analyze and test must be clean for frontend work.
 
+**Admin web**
+
+```bash
+cd admin_web
+flutter analyze
+flutter test
+```
+
+Also clean for `admin_web` work. A console change that only looks right is not
+done: an admin screen's whole value is that an operator can act on what it
+shows, so a changed row, filter, or empty state needs a test that asserts on what
+the operator is told.
+
 ---
 
 ## 10. Git workflow

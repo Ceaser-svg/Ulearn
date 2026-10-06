@@ -137,6 +137,28 @@ Only provisioned backend administrators can sign in. See
 [admin_web/README.md](./admin_web/README.md) for the production build
 configuration and the current pilot surface.
 
+### 5. Provisioning an administrator
+
+There is no public admin registration endpoint, and the console does not assign
+roles. An admin account is created from the backend:
+
+```bash
+cd backend
+python -m app.cli create-admin --email <address>
+```
+
+It prompts for the password twice. In an unattended deployment, where there is no
+terminal to prompt on, pipe it in and pass `--password-stdin` explicitly:
+
+```bash
+python -m app.cli create-admin --email <address> --password-stdin
+```
+
+The command fails if the address already has an account and **never resets an
+existing password**, so a lost admin credential is not recoverable with it. Add
+`--name` to set a display name; without it the account has none, and the audit
+log then shows the operator's email address instead.
+
 ---
 
 ## Regulatory Compliance
@@ -172,6 +194,8 @@ The project is structured for a focused deployment cycle:
 | Document                                   | Description                                                              |
 | ------------------------------------------ | ------------------------------------------------------------------------ |
 | **[Architecture](./docs/architecture.md)** | System design, data model, matching engine & validation protocol         |
+| **[API reference](./docs/api-reference.md)** | Every endpoint, its request and response shapes, and its errors        |
+| **[MUST pilot operations](./docs/MUST_Pilot_Operations.md)** | Operator runbook: working the review queue, evidence, disputes, daily checks |
 | **[Contributing](./docs/Contribution.md)** | Code of Conduct, development workflow, coding standards & review process |
 
 ---
