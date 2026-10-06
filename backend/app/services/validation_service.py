@@ -110,15 +110,44 @@ async def create_competency(
         )
 
     existing = await db.scalar(
-        select(Competency.id).where(
+        select(Competency).where(
             Competency.user_id == user.id,
             Competency.course_unit_id == course_unit.id,
         )
     )
     if existing is not None:
-        raise ValidationProblem(
-            "A competency already exists for this unit.",
-            errors={"course_unit_id": "duplicate competency"},
+        # A rejected proof is the one state a tutor may answer. The reviewer
+        # rejected it with a reason the runbook requires to be actionable, and
+        # the only way to act on that is to submit again for the same unit. The
+        # earlier guard matched on `(user_id, course_unit_id)` alone, so a
+        # rejection was a permanent dead end: the tutor read the reason and
+        # could do nothing about it, for that unit, ever.
+        #
+        # `pending` and `verified` stay closed. A pending proof is already with
+        # a reviewer, and letting a second one through would leave an operator
+        # deciding between two live claims for one unit. A verified one is the
+        # basis of a matching record; replacing it is a different question, and
+        # not one a submission form should answer.
+        if existing.status is not CompetencyStatus.REJECTED:
+            raise ValidationProblem(
+                "A competency already exists for this unit.",
+                errors={"course_unit_id": "duplicate competency"},
+            )
+        # Reopening the row keeps the reviewer history on the same record, so
+        # `reviewed_by_id` and `verified_at` are cleared rather than the old
+        # decision silently describing a claim that no longer exists.
+        existing.grade_id = grade.id
+        existing.status = CompetencyStatus.PENDING
+        existing.source = payload.source
+        existing.evidence_reference = payload.evidence_reference
+        existing.notes = payload.notes
+        existing.verified_at = None
+        existing.rejection_reason = None
+        existing.reviewed_by_id = None
+        await db.flush()
+        await db.commit()
+        return _competency_response(
+            await _load_competency(db, user, existing.public_id)
         )
 
     competency = Competency(
@@ -173,7 +202,10 @@ def _competency_response(competency: Competency) -> CompetencyResponse:
             "id": competency.public_id,
             "user_id": competency.user_public_id,
             "course_unit_id": competency.course_unit_public_id,
+            "course_unit_code": competency.course_unit.code,
+            "course_unit_name": competency.course_unit.name,
             "grade_id": competency.grade_public_id,
+            "grade_label": competency.grade.label,
             "status": competency.status,
             "source": competency.source,
             "grade_points": competency.grade.grade_points,

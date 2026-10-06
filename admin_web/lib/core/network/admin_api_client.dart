@@ -78,11 +78,18 @@ class AdminApiClient {
     String path, {
     required int offset,
     required int limit,
+    Map<String, dynamic> query = const <String, dynamic>{},
   }) async {
     final response = await _authorized(
       () => _dio.get<Map<String, dynamic>>(
         path,
-        queryParameters: <String, dynamic>{'offset': offset, 'limit': limit},
+        queryParameters: <String, dynamic>{
+          'offset': offset,
+          'limit': limit,
+          // Merged rather than replacing, so a screen adding a filter cannot
+          // accidentally stop paging itself.
+          ...query,
+        },
         options: _authOptions(),
       ),
     );

@@ -215,6 +215,19 @@ admin route. Admin responses use dedicated schemas rather than student-facing
 schemas, so passwords, refresh tokens, consent timestamps, competency evidence,
 and internal ids cannot be exposed by adding a field to a shared response.
 
+An admin account is created by `python -m app.cli create-admin`, never by a route.
+The command fails if the address already has an account and never resets a
+password, so it cannot be used to take over an account: provisioning and recovery
+are different problems and only the first has a tool.
+
+`Admin_Audit_Events` records one privileged action as an `actor_id`, an `action`,
+a `target_type`/`target_public_id`, a `context` of identifiers, and a timestamp.
+Request bodies, tokens, passwords, and evidence are deliberately absent — the
+table must not become a second sensitive-data store. The actor's display name is
+read through the relationship, never copied onto the row: a stored name would
+freeze it as it was, and an operator who corrects a typo would leave the log
+contradicting the users table.
+
 `app/services/` is a package of public functions, and a route calls one of them.
 No router reaches for a `_`-prefixed name: reaching into another module's internals
 works until the thing it points at is renamed, and the matching router was doing it
@@ -443,6 +456,46 @@ different courses, graded on two different scales.
 Both `user_id` and `reviewed_by_id` point at `users`, so the ORM relationships
 must name their foreign key explicitly. A pending competency never meets the
 threshold, whatever grade it carries: a grade is a claim until checked.
+
+**The review lifecycle.** A claim is created `pending`. Only `pending` can be
+reviewed: `verified` and `rejected` are closed, so an operator is never offered a
+transition the backend will refuse, and a second decision cannot overwrite the
+first. Verification sets `verified_at` and `reviewed_by_id`; rejection sets
+`rejection_reason`, which is **required** — a tutor turned down with nothing to
+fix has no way to try again.
+
+A rejected claim may be resubmitted for the same (`user_id`, `course_unit_id`),
+which returns it to `pending` with a fresh `created_at`. This is what the unique
+constraint implies rather than forbids: one claim per tutor per unit, revisable.
+The reason a claim was refused stays in place through resubmission, because the
+tutor needs to see what they were told and an operator about to refuse again needs
+to know they have already been told.
+
+There is no `reviewed_at` column. `verified_at` covers the verified case, and a
+rejection has no timestamp of its own — a gap the pilot accepts rather than
+paper over with a field that would lie about the verified case.
+
+**What a reviewer is shown.** The review queue row carries the decision context
+rather than making the operator assemble it: `grade_label`, `grade_points`, the
+university scale's `competency_min_points`, and the server's own `meets_threshold`
+verdict on that pair. `meets_threshold` is `false` for a `pending` or `rejected`
+claim and `true` only once verified; when the university has no grading scale
+loaded there is no bar to compare against, and the field is omitted rather than
+sent as a value to divide by. The client recomputes none of this — it renders
+what the server decided, because the threshold rule is invariant 2 and belongs to
+exactly one place.
+
+`GET /v1/admin/competencies` also takes an optional `status`, applied by the API
+rather than by the console. Filtering after the fact would leave `total` describing
+a filter that was never asked for, and the pager would offer a second page that
+does not exist.
+
+**The console does not hold evidence.** `evidence_reference` is what the tutor
+said they are submitting against — a reference, not an upload, and there is no
+endpoint that returns a document. An operator obtains and reads the evidence
+through MUST's approved channel and decides in the console; see
+`docs/MUST_Pilot_Operations.md`. A console that could open the evidence would put
+a transcript behind an ordinary web session and one leaked credential.
 
 **Tutor_Profiles**
 

@@ -1,10 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:peerpass/core/error/failures.dart';
+import 'package:peerpass/core/models/course_unit_option.dart';
+import 'package:peerpass/core/models/grade_option.dart';
 import 'package:peerpass/core/models/subject.dart';
+import 'package:peerpass/core/models/university_option.dart';
 import 'package:peerpass/core/models/user_profile.dart';
-import 'package:peerpass/features/auth/data/datasources/remote_academics_datasource.dart';
-import 'package:peerpass/features/auth/data/models/university_option.dart';
-
 /// The authentication and own-profile contract the rest of the client depends
 /// on.
 ///
@@ -57,15 +57,6 @@ abstract interface class AuthRepository {
 
   /// Every grade on the university's published scale.
   Future<List<GradeOption>> grades({String? universityId});
-
-  /// Submits transcript or portfolio evidence for a unit the user claims to know.
-  Future<void> submitCompetency({
-    required String courseUnitId,
-    required String gradeId,
-    required String source,
-    String? evidenceReference,
-    String? notes,
-  });
 
   /// Updates the caller's own profile, returning the stored record.
   ///

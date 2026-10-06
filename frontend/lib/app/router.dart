@@ -6,10 +6,11 @@ import 'package:peerpass/core/constants/app_dimens.dart';
 import 'package:peerpass/core/models/user_profile.dart';
 import 'package:peerpass/core/state/session.dart';
 import 'package:peerpass/features/auth/presentation/providers/auth_providers.dart';
-import 'package:peerpass/features/auth/presentation/screens/become_tutor_screen.dart';
 import 'package:peerpass/features/auth/presentation/screens/onboarding_screen.dart';
 import 'package:peerpass/features/auth/presentation/screens/sign_in_screen.dart';
 import 'package:peerpass/features/auth/presentation/screens/sign_up_screen.dart';
+import 'package:peerpass/features/competencies/presentation/screens/my_applications_screen.dart';
+import 'package:peerpass/features/competencies/presentation/screens/submit_claim_screen.dart';
 import 'package:peerpass/features/home/presentation/screens/home_screen.dart';
 import 'package:peerpass/features/home/presentation/screens/profile_screen.dart';
 import 'package:peerpass/features/home/presentation/widgets/authenticated_shell.dart';
@@ -34,6 +35,7 @@ abstract final class AppRoutes {
   static const String signUp = '/sign-up';
   static const String onboarding = '/onboarding';
   static const String tutorVerification = '/tutor-verification';
+  static const String myApplications = '/tutor-applications';
   static const String home = '/home';
   static const String sessions = '/sessions';
   static const String profile = '/profile';
@@ -198,7 +200,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.tutorVerification,
-        builder: (context, state) => const BecomeTutorScreen(),
+        builder: (context, state) => const SubmitClaimScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.myApplications,
+        builder: (context, state) => const MyApplicationsScreen(),
       ),
       ShellRoute(
         builder: (context, state, child) => AuthenticatedShell(

@@ -4,16 +4,21 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:peerpass_admin/core/models/admin_page.dart';
 import 'package:peerpass_admin/core/models/admin_session.dart';
 import 'package:peerpass_admin/core/models/admin_user.dart';
+import 'package:peerpass_admin/core/models/competency_status.dart';
 import 'package:peerpass_admin/core/providers/admin_providers.dart';
+import 'package:peerpass_admin/features/admin/data/repositories/admin_repository.dart';
 import 'package:peerpass_admin/features/admin/presentation/providers/admin_data_providers.dart';
+import 'package:peerpass_admin/features/admin/presentation/providers/admin_list_controller.dart';
 import 'package:peerpass_admin/features/admin/presentation/providers/admin_repository_provider.dart';
 import 'package:peerpass_admin/features/admin/presentation/widgets/admin_data_table.dart';
 import 'package:peerpass_admin/features/admin/presentation/widgets/admin_pagination_bar.dart';
 import 'package:peerpass_admin/features/admin/presentation/widgets/admin_record_card.dart';
 import 'package:peerpass_admin/features/admin/presentation/widgets/admin_record_table.dart';
+import 'package:peerpass_admin/features/admin/presentation/widgets/admin_status_chip.dart';
 
 import '../../../../support/fake_admin_repository.dart';
 import '../../../../support/fixtures.dart';
+import '../../../../support/semantics.dart';
 
 void main() {
   late FakeAdminRepository repository;
@@ -56,10 +61,10 @@ void main() {
                 page: ref.watch(adminUsersProvider),
                 controller: ref.read(adminUsersProvider.notifier),
                 columns: const <String>['Email', 'Name', 'Roles'],
-                row: (user) => <String>[
-                  user.email,
-                  user.name ?? '—',
-                  user.roles.join(', '),
+                row: (user) => [
+                  adminCell(user.email),
+                  adminCell(user.name ?? '—'),
+                  adminCell(user.roles.join(', ')),
                 ],
               ),
             ),
@@ -173,11 +178,100 @@ void main() {
 
     expect(find.byType(AdminRecordCard), findsOneWidget);
     expect(find.byType(AdminRecordTable), findsNothing);
-    // Label and value read as one phrase, not as two loose cells.
-    expect(find.textContaining('Email  0ada@peerpass.test'), findsOneWidget);
+    // Label and value read as one phrase, not as two loose cells. Asserted
+    // through the semantics tree rather than through `find.text`, because the
+    // phrase is what a screen reader is given and the two have to be the same
+    // thing: two visually adjacent Text widgets say nothing to one.
+    // `ensureSemantics` because the assertion is about what is announced, and
+    // the tree only exists while somebody is asking for it. Disposed at the end
+    // of the body rather than in `addTearDown`: the framework asserts that no
+    // handle is still active when the test ends, which runs first.
+    final semantics = tester.ensureSemantics();
+
+    // Label and value are announced as one phrase. Asserted through the
+    // semantics tree rather than through `find.text`, because the phrase is what
+    // a screen reader is given and the visible layout is not: two adjacent Text
+    // widgets say nothing to one, and a card that only *looks* labelled is the
+    // regression this guards against.
+    // One node per field, each reading its heading before its value, which is
+    // what lets an operator move through a record field by field rather than
+    // hearing a whole row at once.
+    expect(
+      announcedLabels(tester, find.byType(AdminRecordCard)),
+      containsAll(<String>[
+        'Email: 0ada@peerpass.test',
+        'Name: ada lovelace 0',
+        'Roles: student',
+      ]),
+    );
+    // And the column headings are still visible, not semantics-only.
+    expect(find.text('Email'), findsOneWidget);
+
     expect(find.text('Showing 1-1 of 1'), findsOneWidget);
     // Nothing was asked to scroll sideways.
     expect(tester.takeException(), isNull);
+    semantics.dispose();
+  });
+
+  testWidgets('announces every field of a record on a narrow window', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(700, 2600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AdminDataTable<String>(
+            title: 'Competency review',
+            subtitle: 'sub',
+            page: const AsyncValue<AdminPage<String>>.data(
+              AdminPage<String>(
+                items: <String>['c1'],
+                total: 1,
+                limit: 50,
+                offset: 0,
+              ),
+            ),
+            controller: _StubListController(),
+            columns: const ['Tutor', 'Status', 'Reason'],
+            // Two of these three are widgets with no text of their own, which is
+            // the case the review queue is in.
+            row: (item) => <Widget>[
+              adminCell('Grace Tutor'),
+              const AdminStatusChip(
+                CompetencyStatus.rejected,
+                label: 'Rejected',
+              ),
+              const AdminRowNote('Page missing.', icon: Icons.block_outlined),
+            ],
+            spokenRow: (item) => const <String>[
+              'Grace Tutor',
+              'Rejected',
+              'Page missing.',
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final semantics = tester.ensureSemantics();
+
+    // Every field, not just the one that happened to be plain text. An operator
+    // working the queue from a phone is deciding on the status and the reason;
+    // hearing a heading with nothing after it is worse than not being offered
+    // the card at all.
+    expect(
+      announcedLabels(tester, find.byType(AdminRecordCard)),
+      containsAll(<String>[
+        'Tutor: Grace Tutor',
+        'Status: Rejected',
+        'Reason: Page missing.',
+      ]),
+    );
+    semantics.dispose();
   });
 
   testWidgets('re-reads a failed list when the retry is pressed', (
@@ -223,5 +317,24 @@ void main() {
 
       expect(repository.userRequests, hasLength(1));
     },
+  );
+}
+
+/// A pager that satisfies the table's contract without a repository.
+///
+/// The card test is about how a record is announced, so it drives the table
+/// directly rather than standing up a signed-in console and a fake list. Its
+/// `build` is never run -- nothing listens to it, and the page is handed to the
+/// table as data.
+class _StubListController extends AdminListController<String> {
+  @override
+  Future<AdminPage<String>> fetch(
+    AdminRepository repository,
+    AdminPageRequest request,
+  ) async => const AdminPage<String>(
+    items: <String>['c1'],
+    total: 1,
+    limit: 50,
+    offset: 0,
   );
 }

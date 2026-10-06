@@ -7,6 +7,15 @@
 # the exclusion does not depend on the Python `lib/` rule further down.
 legacy/
 
+# ---------- Agent tooling ----------
+# .agents/ holds skill definitions for coding agents. They are development
+# tooling rather than part of the application: no build, test, or deploy step
+# reads them, and every one of them is also published upstream. Untracked so a
+# clone carries only what runs, and so the tool's own churn does not land in the
+# app's history. The skills stay on disk for anyone who wants them locally.
+.agents/
+skills-lock.json
+
 # ---------- OS generated ----------
 .DS_Store
 .DS_Store?

@@ -1,9 +1,11 @@
+import 'package:dio/dio.dart';
 import 'package:peerpass_admin/core/models/admin_competency.dart';
 import 'package:peerpass_admin/core/models/admin_page.dart';
 import 'package:peerpass_admin/core/models/admin_session.dart';
 import 'package:peerpass_admin/core/models/admin_tutor_standing.dart';
 import 'package:peerpass_admin/core/models/admin_user.dart';
 import 'package:peerpass_admin/core/models/audit_event.dart';
+import 'package:peerpass_admin/core/models/competency_status.dart';
 import 'package:peerpass_admin/features/admin/data/repositories/admin_repository.dart';
 
 /// One recorded review, so a test can assert what was asked for.
@@ -33,7 +35,7 @@ class FakeAdminRepository implements AdminRepository {
       email: 'operator@peerpass.test',
     ),
     this.signInError,
-    this.failNextReview = false,
+    this.reviewError,
     this.listError,
   });
 
@@ -46,15 +48,22 @@ class FakeAdminRepository implements AdminRepository {
   /// Thrown from [signIn] when set, for the failure paths.
   Error? signInError;
 
-  /// Makes the next review throw a transport error.
-  bool failNextReview;
-
   /// Thrown from every list read while set, for the failure paths.
   Error? listError;
+
+  /// Set to have the next [reviewCompetency] fail, as a refused decision would.
+  ///
+  /// A [DioException], not an arbitrary error, because that is what the HTTP
+  /// repository actually throws: a screen test that made the fake fail with
+  /// something else would not be exercising the translation the console depends on.
+  DioException? reviewError;
 
   final List<AdminPageRequest> userRequests = <AdminPageRequest>[];
   final List<AdminPageRequest> auditEventRequests = <AdminPageRequest>[];
   final List<AdminPageRequest> competencyRequests = <AdminPageRequest>[];
+
+  /// The status each competencies read was narrowed to, in call order.
+  final List<CompetencyStatus?> competencyFilters = <CompetencyStatus?>[];
   final List<AdminPageRequest> tutorStandingRequests = <AdminPageRequest>[];
   final List<RecordedReview> reviews = <RecordedReview>[];
   int signOutCount = 0;
@@ -82,11 +91,18 @@ class FakeAdminRepository implements AdminRepository {
 
   @override
   Future<AdminPage<AdminCompetency>> competencies(
-    AdminPageRequest request,
-  ) async {
+    AdminPageRequest request, {
+    CompetencyStatus? status,
+  }) async {
     competencyRequests.add(request);
+    competencyFilters.add(status);
     _throwIfListError();
-    return _slice(competencyRows, request);
+    // Filters the way the API does, so a test proves something about what the
+    // console asked for rather than only about what the fake was handed.
+    final matching = status == null
+        ? competencyRows
+        : competencyRows.where((row) => row.status == status).toList();
+    return _slice(matching, request);
   }
 
   @override
@@ -105,9 +121,10 @@ class FakeAdminRepository implements AdminRepository {
     String? reason,
   }) async {
     reviews.add(RecordedReview(competency, status, reason));
-    if (failNextReview) {
-      failNextReview = false;
-      throw StateError('review rejected by the fake');
+    final error = reviewError;
+    if (error != null) {
+      reviewError = null;
+      throw error;
     }
   }
 

@@ -166,6 +166,11 @@ async def first_course_unit(env: CommittedEnv) -> dict:
         return {
             "id": str(row.public_id),
             "code": row.code,
+            # The name too, for the display-name assertions that compare what the
+            # API sends back against the row it was built from. Deriving it here
+            # rather than asserting only on non-null is what makes those tests
+            # catch a builder reading the wrong column.
+            "name": row.name,
             "subject_id": str(row.subject.public_id) if row.subject else None,
         }
 

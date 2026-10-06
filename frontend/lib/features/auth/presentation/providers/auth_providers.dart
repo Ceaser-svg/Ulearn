@@ -2,13 +2,12 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:peerpass/core/error/failures.dart';
+import 'package:peerpass/core/models/academic_fallback.dart';
+import 'package:peerpass/core/models/course_unit_option.dart';
 import 'package:peerpass/core/models/subject.dart';
+import 'package:peerpass/core/models/university_option.dart';
 import 'package:peerpass/core/state/session.dart';
-import 'package:peerpass/features/auth/data/datasources/remote_academics_datasource.dart';
-import 'package:peerpass/features/auth/data/models/academic_fallback.dart';
-import 'package:peerpass/features/auth/data/models/university_option.dart';
 import 'package:peerpass/features/auth/data/repositories/auth_repository.dart';
-
 /// The auth operations, as calls the screens can make.
 ///
 /// Performs authentication against the repository and records the outcome in
@@ -75,22 +74,6 @@ class AuthController {
       primaryCourseUnitIds: primaryCourseUnitIds,
     );
     _session.signedIn(profile);
-  }
-
-  Future<void> submitTutorProof({
-    required String courseUnitId,
-    required String gradeId,
-    required String source,
-    String? evidenceReference,
-    String? notes,
-  }) async {
-    await _repository.submitCompetency(
-      courseUnitId: courseUnitId,
-      gradeId: gradeId,
-      source: source,
-      evidenceReference: evidenceReference,
-      notes: notes,
-    );
   }
 
   /// Ends the session and returns to the signed-out state.
@@ -182,14 +165,3 @@ final courseUnitsProvider =
             subjectId: scope.subjectId,
           );
     });
-
-// The family provider's generic arguments are explicit enough for the API call,
-// but the analyzer does not expose that as a concrete type for this property.
-// ignore: specify_nonobvious_property_types
-final gradesProvider = FutureProvider.family<List<GradeOption>, String>((
-  ref,
-  universityId,
-) {
-  if (universityId.isEmpty) return Future.value(const []);
-  return ref.read(authRepositoryProvider).grades(universityId: universityId);
-});

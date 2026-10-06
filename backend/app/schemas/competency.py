@@ -53,12 +53,21 @@ class CompetencyResponse(OrmSchema):
     bar, and is sent so the tutor's own profile can show the gap. It is a
     convenience, not the rule: matching consults the stored status and grade
     rather than trusting a boolean over the wire.
+
+    The unit and the grade travel as names and labels as well as ids. This
+    response is the only thing a tutor has after submitting, so it is what the
+    "my applications" screen reads -- and a list of opaque unit ids tells a
+    student nothing about which of their proofs is waiting. The ids remain: they
+    are what a client identifies a unit by.
     """
 
     id: uuid.UUID = Field(validation_alias="public_id")
     user_id: uuid.UUID = Field(validation_alias="user_public_id")
     course_unit_id: uuid.UUID = Field(validation_alias="course_unit_public_id")
+    course_unit_code: str
+    course_unit_name: str
     grade_id: uuid.UUID = Field(validation_alias="grade_public_id")
+    grade_label: str
     status: CompetencyStatus
     source: VerificationSource
     grade_points: Decimal = Field(max_digits=6, decimal_places=2)

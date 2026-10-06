@@ -1,11 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:peerpass/core/error/failures.dart';
+import 'package:peerpass/core/models/academic_fallback.dart';
 import 'package:peerpass/core/state/session.dart';
-import 'package:peerpass/features/auth/data/models/academic_fallback.dart';
 import 'package:peerpass/features/auth/data/repositories/auth_repository.dart';
 import 'package:peerpass/features/auth/presentation/providers/auth_providers.dart';
-
 /// Which step of the wizard the student is on.
 ///
 /// Two steps in this release. A third, the units they want help with, is

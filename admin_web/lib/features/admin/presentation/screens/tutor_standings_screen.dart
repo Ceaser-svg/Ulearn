@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:peerpass_admin/core/models/admin_tutor_standing.dart';
 import 'package:peerpass_admin/features/admin/presentation/providers/admin_data_providers.dart';
 import 'package:peerpass_admin/features/admin/presentation/widgets/admin_data_table.dart';
+import 'package:peerpass_admin/features/admin/presentation/widgets/admin_record_table.dart';
 
 /// Tutor standing and rating aggregates.
 class TutorStandingsScreen extends ConsumerWidget {
@@ -17,10 +18,10 @@ class TutorStandingsScreen extends ConsumerWidget {
       controller: ref.read(adminTutorStandingsProvider.notifier),
       columns: const ['Tutor', 'Standing', 'Sessions', 'Average rating'],
       row: (standing) => [
-        standing.name ?? standing.email,
-        standing.standing,
-        '${standing.sessions}',
-        standing.rating ?? 'Unrated',
+        adminCell(standing.name ?? standing.email),
+        adminCell(standing.standing),
+        adminCell('${standing.sessions}'),
+        adminCell(standing.rating ?? 'Unrated'),
       ],
     );
   }

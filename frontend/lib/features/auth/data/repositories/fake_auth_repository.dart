@@ -1,13 +1,13 @@
 import 'dart:async';
 
+import 'package:peerpass/core/models/course_unit_option.dart';
+import 'package:peerpass/core/models/grade_option.dart';
 import 'package:peerpass/core/models/subject.dart';
+import 'package:peerpass/core/models/university_option.dart';
 import 'package:peerpass/core/models/user_profile.dart';
 import 'package:peerpass/core/models/user_role.dart';
 import 'package:peerpass/core/storage/token_store.dart';
-import 'package:peerpass/features/auth/data/datasources/remote_academics_datasource.dart';
-import 'package:peerpass/features/auth/data/models/university_option.dart';
 import 'package:peerpass/features/auth/data/repositories/auth_repository.dart';
-
 /// In-memory stand-in for the auth endpoints.
 ///
 /// What the running app resolved while the API had no auth endpoints, and what
@@ -52,8 +52,6 @@ class FakeAuthRepository implements AuthRepository {
 
   final Completer<UserProfile?>? _pendingRestore;
   final TokenStore _tokenStore;
-
-  final List<Map<String, Object?>> submittedCompetencies = [];
 
   /// Every [updateProfile] call, in order.
   ///
@@ -122,23 +120,6 @@ class FakeAuthRepository implements AuthRepository {
   @override
   Future<List<GradeOption>> grades({String? universityId}) async =>
       gradeOptions;
-
-  @override
-  Future<void> submitCompetency({
-    required String courseUnitId,
-    required String gradeId,
-    required String source,
-    String? evidenceReference,
-    String? notes,
-  }) async {
-    submittedCompetencies.add({
-      'course_unit_id': courseUnitId,
-      'grade_id': gradeId,
-      'source': source,
-      'evidence_reference': evidenceReference,
-      'notes': notes,
-    });
-  }
 
   @override
   Future<UserProfile> updateProfile({

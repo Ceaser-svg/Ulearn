@@ -8,6 +8,9 @@ import 'package:peerpass/features/auth/data/datasources/remote_academics_datasou
 import 'package:peerpass/features/auth/data/datasources/remote_auth_datasource.dart';
 import 'package:peerpass/features/auth/data/repositories/auth_repository.dart';
 import 'package:peerpass/features/auth/data/repositories/remote_auth_repository.dart';
+import 'package:peerpass/features/competencies/data/datasources/remote_competencies_datasource.dart';
+import 'package:peerpass/features/competencies/data/repositories/remote_competencies_repository.dart';
+import 'package:peerpass/features/competencies/presentation/providers/competency_providers.dart';
 import 'package:peerpass/features/incentives/data/datasources/remote_incentives_datasource.dart';
 import 'package:peerpass/features/incentives/data/repositories/incentives_repository.dart';
 import 'package:peerpass/features/incentives/data/repositories/remote_incentives_repository.dart';
@@ -66,6 +69,9 @@ void main() {
   final incentivesRepository = RemoteIncentivesRepository(
     RemoteIncentivesDatasource(dio),
   );
+  final competenciesRepository = RemoteCompetenciesRepository(
+    datasource: RemoteCompetenciesDatasource(dio),
+  );
 
   runApp(
     ProviderScope(
@@ -74,7 +80,8 @@ void main() {
       // data layer for a fake in one line.
       //
       // `sessionsRepositoryProvider`, `tutorsRepositoryProvider`,
-      // `matchingRepositoryProvider` and `incentivesRepositoryProvider` all
+      // `matchingRepositoryProvider`, `incentivesRepositoryProvider` and
+      // `competenciesRepositoryProvider` all
       // throw unless they are overridden, so leaving one out does not degrade to
       // a fake that quietly reports no sessions, no tutors and nobody eligible:
       // the failure is immediate and names the missing override.
@@ -84,6 +91,9 @@ void main() {
         tutorsRepositoryProvider.overrideWithValue(tutorsRepository),
         matchingRepositoryProvider.overrideWithValue(matchingRepository),
         incentivesRepositoryProvider.overrideWithValue(incentivesRepository),
+        competenciesRepositoryProvider.overrideWithValue(
+          competenciesRepository,
+        ),
       ],
       child: const PeerPassApp(),
     ),

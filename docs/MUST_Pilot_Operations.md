@@ -12,9 +12,7 @@ owns the daily metrics check. The backup can perform the same actions when
 the primary is unavailable. **MUST SUPPLY:** names, phone numbers, and the
 support mailbox for both roles.
 
-Admin accounts are individually assigned, use unique credentials, and are
-removed when staff leave the pilot. Operators must not share accounts or
-export user lists to personal devices.
+Provisioning is covered under **Provisioning an administrator**.
 
 ## Cohort and invitation
 
@@ -32,17 +30,68 @@ It must not contain passwords, tokens, transcript images, or copied evidence.
 
 ## Tutor evidence and standing
 
-Operators review each pending competency in the admin console against the
-submitted evidence and the selected course unit. A competency is accepted
-only when the evidence supports a B+ (4.5) or higher result for that unit.
-Evidence is not copied into audit events. Rejection must include a clear,
-non-sensitive reason that the tutor can act on.
+### Working the review queue
+
+Open **Competency review** in the admin console. The queue is every status until
+a filter is chosen; use the status filter to work one state at a time, which is
+what the filter is for. Each row shows the tutor, the unit, the grade with the
+bar it has to clear, the server's verdict on that bar, the status, when it was
+submitted, and any previous refusal reason.
+
+Every decision needs the evidence in front of the operator, and the console does
+not carry it. `evidence_reference` is what the tutor said they are submitting
+against — a reference they supplied, such as a transcript held by the faculty
+office. **Operators must obtain and read the evidence through MUST's approved
+channel and check it against the row in the console.** The console cannot open,
+preview, or download it, so a decision made from the row alone is a decision
+made without looking.
+
+1. Confirm the unit on the row is the unit being claimed.
+2. Confirm the evidence supports a B+ or higher result **for that unit**.
+3. Check the bar the row states. If the grade is under the bar, verification will
+   be refused by the API — reject with the reason instead of attempting it.
+4. Verify or reject. A rejection requires a reason the tutor can act on: what is
+   missing, what to supply, and where. "Grade too low" on a B is not actionable;
+   "the transcript page for the unit result is missing" is. The tutor sees the same
+   string in their app, so an operator refusing the same claim twice must not give
+   two different answers — read the reason the row already carries first.
+
+Two states are not states to work and not faults:
+
+- **A university with no grading scale loaded.** The row says so and shows no bar.
+  Nothing can be verified for that university until MUST loads a scale; leave the
+  claim pending and escalate rather than verifying against no bar.
+- **A status the console does not recognise.** The row shows the server's own
+  wording and offers no actions. A console that names only three states will meet
+  a fourth on a newer API, and an operator must not decide a status this console
+  does not understand. Report the row to engineering and leave it alone.
+
+A verified competency has no further action: `verified` and `rejected` claims are
+closed to review, and only a `pending` row offers the buttons. A rejected tutor
+may resubmit, which returns the claim to `pending` with a new submission time —
+work the resubmission on its own merits rather than as an appeal.
 
 New tutors remain **Provisional** until the backend rating rules promote them.
 Operators must not manually claim that a tutor is Verified. Any manual
 standing adjustment requires a documented reason, a second-operator review,
 and an audit event; the implementation of that workflow is a launch blocker
 until available in the admin API.
+
+### What the console will not do
+
+- **Open or preview evidence.** By design. Evidence stays in the faculty's hands;
+  the console is the decision, not the document.
+- **Verify a grade under the bar.** The backend refuses it, and MUST invariant 2
+  is not a console setting.
+- **Decide a status it does not know.** See above.
+- **Adjust a tutor's standing by hand.** See above.
+
+### The audit log
+
+**Audit log** records who did what. Every row carries the operator's name or
+email, the action, and its target, so an auditor does not have to join against
+the users list to answer "who did this". Checking the log is part of the daily
+checks below.
 
 ## Session support and disputes
 
@@ -77,10 +126,43 @@ procedure requires it. **MUST SUPPLY:** retention periods, deletion owner,
 and the approved privacy notice/consent wording. No production launch should
 claim these values are finalized while they are outstanding.
 
+## Provisioning an administrator
+
+There is no admin registration endpoint and the console does not assign roles. An
+admin account is created on the backend host:
+
+```bash
+cd backend
+python -m app.cli create-admin --email <address>
+```
+
+It prompts for the password twice. Where there is no terminal — a container
+startup, an automated deployment — pipe the password in and pass
+`--password-stdin` explicitly; without that flag the command explains it cannot
+prompt rather than reading the piped value with echo on.
+
+The command **fails if the address already has an account and never resets a
+password.** A lost admin credential is therefore not recoverable with it: use the
+backup operator's account to provision a new one. Add `--name` to set a display
+name; without it the audit log shows the operator's email address instead.
+
+Admin accounts are individually assigned, use unique credentials, and are removed
+when staff leave the pilot. Operators must not share accounts or export user
+lists to personal devices.
+
 ## Daily checks and metrics
 
-The primary operator checks readiness, failed requests, pending competency
-reviews, unresolved safety/dispute reports, and admin audit events daily.
+The primary operator checks daily:
+
+1. `/ready` on the API and the deployed clients.
+2. Failed requests and error responses.
+3. **Competency review, filtered to `pending`.** Anything there has been waiting
+   since the last check. A queue that never empties is a staffing problem; note the
+   oldest submission time.
+4. Unresolved safety and dispute reports.
+5. **Audit log**, for privileged actions with no matching entry in the operator's
+   own record of what they did.
+
 The pilot dashboard or exported report should track:
 
 - invitation-to-onboarding activation and onboarding completion;

@@ -4,6 +4,7 @@ import 'package:peerpass_admin/core/models/admin_session.dart';
 import 'package:peerpass_admin/core/models/admin_tutor_standing.dart';
 import 'package:peerpass_admin/core/models/admin_user.dart';
 import 'package:peerpass_admin/core/models/audit_event.dart';
+import 'package:peerpass_admin/core/models/competency_status.dart';
 
 /// Thrown when an account authenticates but is not provisioned for the console.
 ///
@@ -29,7 +30,16 @@ abstract class AdminRepository {
 
   Future<AdminPage<AuditEvent>> auditEvents(AdminPageRequest request);
 
-  Future<AdminPage<AdminCompetency>> competencies(AdminPageRequest request);
+  /// The review queue, narrowed to [status] when one is given.
+  ///
+  /// The filter is sent to the API rather than applied here because the API
+  /// owns the `total`: a client-side filter would report a count of the rows it
+  /// happened to be holding, and the pager would offer a second page that does
+  /// not exist.
+  Future<AdminPage<AdminCompetency>> competencies(
+    AdminPageRequest request, {
+    CompetencyStatus? status,
+  });
 
   Future<AdminPage<AdminTutorStanding>> tutorStandings(
     AdminPageRequest request,

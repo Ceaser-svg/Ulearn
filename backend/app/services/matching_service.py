@@ -83,6 +83,7 @@ async def list_help_requests(
         .options(
             selectinload(HelpRequest.course_unit).selectinload(CourseUnit.university),
             selectinload(HelpRequest.matched_tutor),
+            selectinload(HelpRequest.tutee),
         )
         .order_by(HelpRequest.created_at.desc())
     )
@@ -636,6 +637,7 @@ async def load_help_request(
         .options(
             selectinload(HelpRequest.course_unit),
             selectinload(HelpRequest.matched_tutor),
+            selectinload(HelpRequest.tutee),
         )
     )
     request = result.scalar_one_or_none()
@@ -655,11 +657,17 @@ def help_request_response(request: HelpRequest) -> HelpRequestResponse:
         {
             "id": request.public_id,
             "tutee_id": request.tutee_public_id,
+            "tutee_name": request.tutee.full_name,
             "course_unit_id": request.course_unit_public_id,
+            "course_unit_code": request.course_unit.code,
+            "course_unit_name": request.course_unit.name,
             "topic": request.topic,
             "description": request.description,
             "status": request.status,
             "matched_tutor_id": request.matched_tutor_public_id,
+            "matched_tutor_name": (
+                request.matched_tutor.full_name if request.matched_tutor else None
+            ),
             "created_at": request.created_at,
         }
     )

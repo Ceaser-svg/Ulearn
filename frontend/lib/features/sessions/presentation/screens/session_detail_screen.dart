@@ -96,7 +96,6 @@ class _Body extends ConsumerWidget {
     // names both parties and the API has already refused anyone who is neither.
     final viewerId = ref.watch(sessionControllerProvider).profile?.publicId;
     final link = session.meetingLink;
-    final otherParty = viewerId == null ? null : session.otherPartyId(viewerId);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -118,10 +117,10 @@ class _Body extends ConsumerWidget {
           ],
         ),
         const SizedBox(height: AppDimens.lg),
-        _FactRow(label: 'Course unit', value: session.courseUnitId),
+        _FactRow(label: 'Course unit', value: session.courseUnitLabel),
         _FactRow(
           label: _otherPartyLabel(session, viewerId),
-          value: otherParty ?? 'Not available',
+          value: _otherParty(session, viewerId),
         ),
         _FactRow(label: 'Length', value: durationLabel(session.durationMinutes)),
         if (session.startedAt case final startedAt?)
@@ -151,15 +150,27 @@ class _Body extends ConsumerWidget {
 
   /// What the other party is called on this screen.
   ///
-  /// The response names both parties by public id and carries no display name for
-  /// either, so the row can say which side of the session the reader is on and
-  /// nothing more. Adding a name to `SessionResponse` is a one-field change on
-  /// the API; until then a public id is shown rather than an empty row, because a
-  /// labelled row with nothing in it is the more confusing of the two.
+  /// Named after the side of the session rather than after the role, so a tutor
+  /// and a student read the same row the same way: whoever is on the other end of
+  /// it is the one they are about to meet.
   String _otherPartyLabel(SessionModel session, String? viewerId) {
     if (viewerId != null && session.isTutee(viewerId)) return 'Tutor';
     if (viewerId != null && session.isTutor(viewerId)) return 'Student';
     return 'Other participant';
+  }
+
+  /// Who the other party is, by name.
+  ///
+  /// Falls back to the public id when the name is missing, for the same reason
+  /// the unit fallback exists: this row is about identifying a person the reader
+  /// is about to meet, and an empty row would answer nothing at all. Once the
+  /// other account sets a name -- which onboarding asks for -- the name is what
+  /// appears.
+  String _otherParty(SessionModel session, String? viewerId) {
+    if (viewerId == null) return 'Not available';
+    final name = session.otherPartyName(viewerId);
+    if (name != null && name.trim().isNotEmpty) return name;
+    return session.otherPartyId(viewerId) ?? 'Not available';
   }
 }
 

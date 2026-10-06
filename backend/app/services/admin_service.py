@@ -19,6 +19,7 @@ from app.schemas.admin import (
     AdminAuditEventPage,
     AdminAuditEventResponse,
     AdminCompetencyPage,
+    AdminCompetencyPageParams,
     AdminCompetencyResponse,
     AdminCompetencyReviewRequest,
     AdminTutorStandingPage,
@@ -71,6 +72,8 @@ async def list_users(
 async def list_audit_events(
     db: AsyncSession, params: PageParams
 ) -> AdminAuditEventPage:
+    # No `selectinload` on the actor: the relationship is joined eagerly, so
+    # asking for it again would be redundant rather than faster.
     query = select(AdminAuditEvent).order_by(
         AdminAuditEvent.created_at.desc(), AdminAuditEvent.id.desc()
     )
@@ -79,7 +82,7 @@ async def list_audit_events(
         (await db.scalars(query.offset(params.offset).limit(params.limit))).all()
     )
     return AdminAuditEventPage(
-        items=[AdminAuditEventResponse.model_validate(event) for event in events],
+        items=[_audit_response(event) for event in events],
         total=total,
         limit=params.limit,
         offset=params.offset,
@@ -87,18 +90,22 @@ async def list_audit_events(
 
 
 async def list_competencies(
-    db: AsyncSession, actor_id: uuid.UUID, params: PageParams
+    db: AsyncSession, actor_id: uuid.UUID, params: AdminCompetencyPageParams
 ) -> AdminCompetencyPage:
     query = (
         select(Competency)
         .join(Competency.user)
         .options(
             selectinload(Competency.user),
-            selectinload(Competency.course_unit),
+            selectinload(Competency.course_unit)
+            .selectinload(CourseUnit.university)
+            .selectinload(University.grading_scale),
             selectinload(Competency.grade),
         )
         .order_by(Competency.created_at.desc(), Competency.id.desc())
     )
+    if params.status is not None:
+        query = query.where(Competency.status == params.status)
     total = await db.scalar(select(func.count()).select_from(query.subquery())) or 0
     rows = list(
         (await db.scalars(query.offset(params.offset).limit(params.limit))).all()
@@ -108,7 +115,14 @@ async def list_competencies(
         actor_id=actor_id,
         action="admin.competencies.list",
         target_type="competency",
-        context={"limit": params.limit, "offset": params.offset},
+        context={
+            "limit": params.limit,
+            "offset": params.offset,
+            # The filter is recorded because a filtered read is a different
+            # read: an auditor asking "what was pending on Tuesday" needs to be
+            # able to see that the operator was looking at exactly that.
+            "status": params.status.value if params.status is not None else None,
+        },
     )
     return AdminCompetencyPage(
         items=[_competency_response(row) for row in rows],
@@ -251,6 +265,10 @@ async def list_tutor_standings(
 
 
 def _competency_response(row: Competency) -> AdminCompetencyResponse:
+    # The gate is read here, not recomputed by the client, so the number an
+    # operator is shown is the same one [review_competency] enforces.
+    scale = row.course_unit.university.grading_scale
+    minimum_points = None if scale is None else Decimal(scale.competency_min_points)
     return AdminCompetencyResponse(
         id=row.public_id,
         user_id=row.user.public_id,
@@ -259,12 +277,38 @@ def _competency_response(row: Competency) -> AdminCompetencyResponse:
         course_unit_id=row.course_unit.public_id,
         course_unit_code=row.course_unit.code,
         course_unit_name=row.course_unit.name,
+        grade_label=row.grade.label,
         grade_points=str(Decimal(row.grade.grade_points)),
+        competency_min_points=None if minimum_points is None else str(minimum_points),
+        # No scale means no bar to clear. Reported as not meeting it rather than
+        # optimistically as meeting it: [review_competency] refuses to verify
+        # without a scale, so `true` here would be a claim the server will not
+        # honour.
+        meets_threshold=(
+            False
+            if minimum_points is None
+            else row.grade.grade_points >= minimum_points
+        ),
         status=row.status,
         source=row.source,
         evidence_reference=row.evidence_reference,
         rejection_reason=row.rejection_reason,
         created_at=row.created_at,
+        verified_at=row.verified_at,
+    )
+
+
+def _audit_response(event: AdminAuditEvent) -> AdminAuditEventResponse:
+    return AdminAuditEventResponse(
+        id=event.public_id,
+        actor_id=event.actor.public_id,
+        actor_email=event.actor.email,
+        actor_name=event.actor.full_name,
+        action=event.action,
+        target_type=event.target_type,
+        target_public_id=event.target_public_id,
+        context=event.context,
+        created_at=event.created_at,
     )
 
 

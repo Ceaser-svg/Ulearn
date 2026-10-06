@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:peerpass_admin/core/models/admin_page.dart';
+import 'package:peerpass_admin/core/models/competency_status.dart';
 import 'package:peerpass_admin/core/network/admin_api_client.dart';
 import 'package:peerpass_admin/features/admin/data/repositories/admin_repository.dart';
 import 'package:peerpass_admin/features/admin/data/repositories/http_admin_repository.dart';
@@ -125,6 +126,57 @@ void main() {
         '/v1/admin/competencies',
         '/v1/admin/tutor-standings',
       ]);
+    });
+
+    test('narrows the queue on the server, not in the client', () async {
+      await repository().signIn('operator@peerpass.test', 'pw');
+
+      await repository().competencies(
+        const AdminPageRequest(),
+        status: CompetencyStatus.pending,
+      );
+
+      // The filter is a query parameter. Filtering the returned rows locally
+      // would leave `total` describing a filter the API never applied, and the
+      // pager would offer a second page that does not exist.
+      expect(transport.requests.last.queryParameters, <String, dynamic>{
+        'offset': 0,
+        'limit': 50,
+        'status': 'pending',
+      });
+    });
+
+    test('sends no status at all when the queue is unfiltered', () async {
+      await repository().signIn('operator@peerpass.test', 'pw');
+
+      await repository().competencies(const AdminPageRequest());
+
+      // Omitted rather than sent empty: `status=` is not a member of the API's
+      // enum, so an empty value would be a 422 on the list the operator simply
+      // opened.
+      expect(transport.requests.last.queryParameters, <String, dynamic>{
+        'offset': 0,
+        'limit': 50,
+      });
+      expect(
+        transport.requests.last.queryParameters.containsKey('status'),
+        isFalse,
+      );
+    });
+
+    test('keeps paging itself when a filter is set', () async {
+      await repository().signIn('operator@peerpass.test', 'pw');
+
+      await repository().competencies(
+        const AdminPageRequest(page: 3, limit: 25),
+        status: CompetencyStatus.rejected,
+      );
+
+      expect(transport.requests.last.queryParameters, <String, dynamic>{
+        'offset': 50,
+        'limit': 25,
+        'status': 'rejected',
+      });
     });
   });
 
