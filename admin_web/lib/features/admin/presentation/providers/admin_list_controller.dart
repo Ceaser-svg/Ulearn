@@ -44,6 +44,18 @@ abstract class AdminListController<T> extends AsyncNotifier<AdminPage<T>> {
     ref.invalidateSelf();
   }
 
+  /// Returns to the first page and re-reads.
+  ///
+  /// Separate from [show] because a filter change moves the rows underneath the
+  /// page number: staying on page 3 of a queue that now matches two rows would
+  /// show an empty window, and an operator would read that as "I cleared the
+  /// queue" rather than as "you are past the end". The page size is kept, since
+  /// that is the operator's own preference rather than a position in the data.
+  void showFirstPage() {
+    _request = AdminPageRequest(limit: _request.limit);
+    ref.invalidateSelf();
+  }
+
   /// Re-reads the current page, after a review was recorded or an operator
   /// asked a failed list to try again.
   void refresh() => ref.invalidateSelf();

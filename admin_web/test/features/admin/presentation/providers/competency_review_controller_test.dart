@@ -10,9 +10,7 @@ DioException _problem(int status, [Object? body]) => DioException(
   requestOptions: RequestOptions(path: '/v1/admin/competencies/c1/review'),
   type: DioExceptionType.badResponse,
   response: Response<dynamic>(
-    requestOptions: RequestOptions(
-      path: '/v1/admin/competencies/c1/review',
-    ),
+    requestOptions: RequestOptions(path: '/v1/admin/competencies/c1/review'),
     statusCode: status,
     data: body,
   ),
@@ -180,23 +178,26 @@ void main() {
       );
     });
 
-    test('a server fault does not claim the operator did something wrong', () async {
-      repository.reviewError = _problem(500, {'status': 500});
+    test(
+      'a server fault does not claim the operator did something wrong',
+      () async {
+        repository.reviewError = _problem(500, {'status': 500});
 
-      await expectLater(
-        controller.verify(competencyFixture()),
-        throwsA(
-          isA<AdminReviewException>().having(
-            (error) => error.message,
-            'message',
-            allOf(
-              contains('server'),
-              isNot(contains('could not be reviewed with these details')),
+        await expectLater(
+          controller.verify(competencyFixture()),
+          throwsA(
+            isA<AdminReviewException>().having(
+              (error) => error.message,
+              'message',
+              allOf(
+                contains('server'),
+                isNot(contains('could not be reviewed with these details')),
+              ),
             ),
           ),
-        ),
-      );
-    });
+        );
+      },
+    );
 
     test('a dropped connection says so', () async {
       repository.reviewError = _transport(DioExceptionType.connectionError);
@@ -207,26 +208,32 @@ void main() {
           isA<AdminReviewException>().having(
             (error) => error.message,
             'message',
-            allOf(contains('Could not reach the server'), contains('connection')),
+            allOf(
+              contains('Could not reach the server'),
+              contains('connection'),
+            ),
           ),
         ),
       );
     });
 
-    test('a timeout says the server was slow, not that the review failed', () async {
-      repository.reviewError = _transport(DioExceptionType.receiveTimeout);
+    test(
+      'a timeout says the server was slow, not that the review failed',
+      () async {
+        repository.reviewError = _transport(DioExceptionType.receiveTimeout);
 
-      await expectLater(
-        controller.verify(competencyFixture()),
-        throwsA(
-          isA<AdminReviewException>().having(
-            (error) => error.message,
-            'message',
-            contains('too long to respond'),
+        await expectLater(
+          controller.verify(competencyFixture()),
+          throwsA(
+            isA<AdminReviewException>().having(
+              (error) => error.message,
+              'message',
+              contains('too long to respond'),
+            ),
           ),
-        ),
-      );
-    });
+        );
+      },
+    );
 
     test('a rejected certificate is called a security problem', () async {
       // The one case where "try again" is the wrong advice: retrying against a
@@ -245,20 +252,23 @@ void main() {
       );
     });
 
-    test('a rejected certificate does not tell the operator to retry', () async {
-      repository.reviewError = _transport(DioExceptionType.badCertificate);
+    test(
+      'a rejected certificate does not tell the operator to retry',
+      () async {
+        repository.reviewError = _transport(DioExceptionType.badCertificate);
 
-      await expectLater(
-        controller.verify(competencyFixture()),
-        throwsA(
-          isA<AdminReviewException>().having(
-            (error) => error.message,
-            'message',
-            isNot(contains('Try again')),
+        await expectLater(
+          controller.verify(competencyFixture()),
+          throwsA(
+            isA<AdminReviewException>().having(
+              (error) => error.message,
+              'message',
+              isNot(contains('Try again')),
+            ),
           ),
-        ),
-      );
-    });
+        );
+      },
+    );
   });
 
   group('what never reaches the operator', () {
@@ -289,34 +299,37 @@ void main() {
       );
     });
 
-    test('a non-string field error is dropped rather than rendered as null', () async {
-      // `retry_after_seconds` is an int in the problem document. Rendering
-      // "[object Object]" or "null" beside a validation message helps nobody.
-      repository.reviewError = _problem(422, {
-        'status': 422,
-        'detail': 'Some of the details you entered are not valid.',
-        'errors': {
-          'status': 'pending is not a review decision',
-          'rejection_reason': null,
-          'retry_after_seconds': 900,
-        },
-      });
+    test(
+      'a non-string field error is dropped rather than rendered as null',
+      () async {
+        // `retry_after_seconds` is an int in the problem document. Rendering
+        // "[object Object]" or "null" beside a validation message helps nobody.
+        repository.reviewError = _problem(422, {
+          'status': 422,
+          'detail': 'Some of the details you entered are not valid.',
+          'errors': {
+            'status': 'pending is not a review decision',
+            'rejection_reason': null,
+            'retry_after_seconds': 900,
+          },
+        });
 
-      await expectLater(
-        controller.verify(competencyFixture()),
-        throwsA(
-          isA<AdminReviewException>().having(
-            (error) => error.message,
-            'message',
-            allOf(
-              contains('status: pending is not a review decision'),
-              isNot(contains('null')),
-              isNot(contains('900')),
+        await expectLater(
+          controller.verify(competencyFixture()),
+          throwsA(
+            isA<AdminReviewException>().having(
+              (error) => error.message,
+              'message',
+              allOf(
+                contains('status: pending is not a review decision'),
+                isNot(contains('null')),
+                isNot(contains('900')),
+              ),
             ),
           ),
-        ),
-      );
-    });
+        );
+      },
+    );
 
     test('a 4xx with no problem document still says something specific', () async {
       // A gateway can answer a request without the body's being this API's. The
@@ -335,25 +348,30 @@ void main() {
       );
     });
 
-    test('a refusal with no status is not reported as a server fault', () async {
-      repository.reviewError = DioException(
-        requestOptions: RequestOptions(path: '/v1/admin/competencies/c1/review'),
-        type: DioExceptionType.badResponse,
-      );
+    test(
+      'a refusal with no status is not reported as a server fault',
+      () async {
+        repository.reviewError = DioException(
+          requestOptions: RequestOptions(
+            path: '/v1/admin/competencies/c1/review',
+          ),
+          type: DioExceptionType.badResponse,
+        );
 
-      await expectLater(
-        controller.verify(competencyFixture()),
-        throwsA(
-          isA<AdminReviewException>().having(
-            (error) => error.message,
-            'message',
-            allOf(
-              isNot(contains('sign in')),
-              isNot(contains('below the competency threshold')),
+        await expectLater(
+          controller.verify(competencyFixture()),
+          throwsA(
+            isA<AdminReviewException>().having(
+              (error) => error.message,
+              'message',
+              allOf(
+                isNot(contains('sign in')),
+                isNot(contains('below the competency threshold')),
+              ),
             ),
           ),
-        ),
-      );
-    });
+        );
+      },
+    );
   });
 }

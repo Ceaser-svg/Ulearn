@@ -4,6 +4,7 @@ import 'package:peerpass_admin/core/models/admin_page.dart';
 import 'package:peerpass_admin/core/models/admin_tutor_standing.dart';
 import 'package:peerpass_admin/core/models/admin_user.dart';
 import 'package:peerpass_admin/core/models/audit_event.dart';
+import 'package:peerpass_admin/core/models/competency_status.dart';
 import 'package:peerpass_admin/features/admin/data/repositories/admin_repository.dart';
 import 'package:peerpass_admin/features/admin/presentation/providers/admin_list_controller.dart';
 
@@ -45,11 +46,27 @@ final adminCompetenciesProvider =
     >(AdminCompetenciesController.new, retry: _noAutomaticRetry);
 
 class AdminCompetenciesController extends AdminListController<AdminCompetency> {
+  CompetencyStatus? _status;
+
+  /// The status the queue is narrowed to, or null for every status.
+  CompetencyStatus? get status => _status;
+
+  /// Narrows the queue to [status], or widens it again with null.
+  ///
+  /// Held here rather than in the widget so that the filter the request was sent
+  /// with and the filter the control shows are the same value, and so a rebuild
+  /// cannot show one while fetching the other.
+  void showStatus(CompetencyStatus? status) {
+    if (status == _status) return;
+    _status = status;
+    showFirstPage();
+  }
+
   @override
   Future<AdminPage<AdminCompetency>> fetch(
     AdminRepository repository,
     AdminPageRequest request,
-  ) => repository.competencies(request);
+  ) => repository.competencies(request, status: _status);
 }
 
 /// Tutor standings and rating aggregates.

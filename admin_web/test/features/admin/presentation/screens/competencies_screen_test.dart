@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:peerpass_admin/core/models/admin_competency.dart';
 import 'package:peerpass_admin/core/models/admin_session.dart';
+import 'package:peerpass_admin/core/models/competency_status.dart';
 import 'package:peerpass_admin/core/providers/admin_providers.dart';
 import 'package:peerpass_admin/core/theme/admin_theme.dart';
 import 'package:peerpass_admin/features/admin/presentation/providers/admin_repository_provider.dart';
@@ -38,9 +39,9 @@ Future<ProviderContainer> _pump(
 
   final container = ProviderContainer.test(
     // One override, the repository contract the console's lists and writes
-  // both read: signing in supplies the session, so a screen test does not
-  // have to stand up a token exchange to reach a table.
-  overrides: [adminRepositoryProvider.overrideWithValue(repository)],
+    // both read: signing in supplies the session, so a screen test does not
+    // have to stand up a token exchange to reach a table.
+    overrides: [adminRepositoryProvider.overrideWithValue(repository)],
   );
   container.read(sessionProvider.notifier).signedIn(_session);
   addTearDown(container.dispose);
@@ -68,9 +69,7 @@ DioException _problem(int status, Object? body) => DioException(
   requestOptions: RequestOptions(path: '/v1/admin/competencies/c1/review'),
   type: DioExceptionType.badResponse,
   response: Response<dynamic>(
-    requestOptions: RequestOptions(
-      path: '/v1/admin/competencies/c1/review',
-    ),
+    requestOptions: RequestOptions(path: '/v1/admin/competencies/c1/review'),
     statusCode: status,
     data: body,
   ),
@@ -113,34 +112,35 @@ void main() {
     testWidgets('the buttons come back when the review failed', (tester) async {
       // Nothing was recorded, so the operator's only way to record it is to try
       // again. Leaving the row permanently busy would strand it.
-      final repository = FakeAdminRepository(competencyRows: [competencyFixture()])
-        ..reviewError = _problem(422, {
-          'status': 422,
-          'detail': 'A rejection reason is required.',
-        });
+      final repository =
+          FakeAdminRepository(competencyRows: [competencyFixture()])
+            ..reviewError = _problem(422, {
+              'status': 422,
+              'detail': 'A rejection reason is required.',
+            });
       await _pump(tester, repository);
 
       await tester.tap(find.widgetWithText(TextButton, 'Verify'));
       await tester.pumpAndSettle();
 
-      expect(
-        find.text('A rejection reason is required.'),
-        findsOneWidget,
-      );
+      expect(find.text('A rejection reason is required.'), findsOneWidget);
       expect(find.text('Verify'), findsOneWidget);
       expect(find.text('Reject'), findsOneWidget);
     });
 
-    testWidgets('a refused verification does not report success', (tester) async {
+    testWidgets('a refused verification does not report success', (
+      tester,
+    ) async {
       // The controller threw where the old one returned an outcome enum. A caller
       // that forgot to check it would have shown "Competency verified." over a
       // record the API never accepted.
-      final repository = FakeAdminRepository(competencyRows: [competencyFixture()])
-        ..reviewError = _problem(422, {
-          'status': 422,
-          'detail': 'This grade is below the competency threshold.',
-          'errors': {'status': 'requires 4.5 or higher on the MUST scale'},
-        });
+      final repository =
+          FakeAdminRepository(competencyRows: [competencyFixture()])
+            ..reviewError = _problem(422, {
+              'status': 422,
+              'detail': 'This grade is below the competency threshold.',
+              'errors': {'status': 'requires 4.5 or higher on the MUST scale'},
+            });
       await _pump(tester, repository);
 
       await tester.tap(find.widgetWithText(TextButton, 'Verify'));
@@ -160,15 +160,19 @@ void main() {
     });
 
     testWidgets('an expired session is reported as one', (tester) async {
-      final repository = FakeAdminRepository(competencyRows: [competencyFixture()])
-        ..reviewError = _problem(401, {'status': 401});
+      final repository = FakeAdminRepository(
+        competencyRows: [competencyFixture()],
+      )..reviewError = _problem(401, {'status': 401});
       await _pump(tester, repository);
 
       await tester.tap(find.widgetWithText(TextButton, 'Verify'));
       await tester.pumpAndSettle();
 
       expect(find.textContaining('Sign in again'), findsOneWidget);
-      expect(find.text('Could not record the review. Try again.'), findsNothing);
+      expect(
+        find.text('Could not record the review. Try again.'),
+        findsNothing,
+      );
     });
 
     testWidgets('a decided competency offers no actions', (tester) async {
@@ -191,7 +195,9 @@ void main() {
       // Previously the dialog returned an empty string and the screen dropped it,
       // so an operator who tapped Reject and left the field blank got no message
       // at all -- indistinguishable from having cancelled.
-      final repository = FakeAdminRepository(competencyRows: [competencyFixture()]);
+      final repository = FakeAdminRepository(
+        competencyRows: [competencyFixture()],
+      );
       await _pump(tester, repository);
 
       await _openRejectionDialog(tester);
@@ -205,27 +211,28 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         tester
-            .widget<FilledButton>(
-              find.widgetWithText(FilledButton, 'Reject'),
-            )
+            .widget<FilledButton>(find.widgetWithText(FilledButton, 'Reject'))
             .onPressed,
         isNull,
       );
 
-      await tester.enterText(find.byType(TextField), 'The transcript is missing.');
+      await tester.enterText(
+        find.byType(TextField),
+        'The transcript is missing.',
+      );
       await tester.pumpAndSettle();
       expect(
         tester
-            .widget<FilledButton>(
-              find.widgetWithText(FilledButton, 'Reject'),
-            )
+            .widget<FilledButton>(find.widgetWithText(FilledButton, 'Reject'))
             .onPressed,
         isNotNull,
       );
     });
 
     testWidgets('the reason typed is the reason sent, trimmed', (tester) async {
-      final repository = FakeAdminRepository(competencyRows: [competencyFixture()]);
+      final repository = FakeAdminRepository(
+        competencyRows: [competencyFixture()],
+      );
       await _pump(tester, repository);
 
       await _openRejectionDialog(tester);
@@ -248,7 +255,9 @@ void main() {
     testWidgets('cancelling sends nothing and says nothing', (tester) async {
       // A deliberate cancellation is not a failure, so it gets no snack bar. It
       // must also not reach the API.
-      final repository = FakeAdminRepository(competencyRows: [competencyFixture()]);
+      final repository = FakeAdminRepository(
+        competencyRows: [competencyFixture()],
+      );
       await _pump(tester, repository);
 
       await _openRejectionDialog(tester);
@@ -260,7 +269,9 @@ void main() {
       expect(find.text('Verify'), findsOneWidget);
     });
 
-    testWidgets('the field cannot be filled past the API limit', (tester) async {
+    testWidgets('the field cannot be filled past the API limit', (
+      tester,
+    ) async {
       // Told here rather than as a 422 the operator cannot predict. The server
       // still owns the rule; this only avoids the round trip.
       await tester.pumpWidget(
@@ -299,19 +310,218 @@ void main() {
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pumpAndSettle();
 
-      expect(
-        find.textContaining('A reason is required'),
-        findsOneWidget,
-      );
+      expect(find.textContaining('A reason is required'), findsOneWidget);
       expect(find.byType(RejectionReasonDialog), findsOneWidget);
     });
+  });
+
+  group('the queue as a whole', () {
+    testWidgets('opens unfiltered', (tester) async {
+      final repository = FakeAdminRepository(
+        competencyRows: <AdminCompetency>[
+          competencyFixture(id: 'c1'),
+          competencyFixture(id: 'c2', status: 'rejected'),
+        ],
+      );
+
+      await _pump(tester, repository);
+
+      // Omitting the filter is every status. Opening on a filtered view would
+      // hide work without saying so.
+      expect(find.text('All statuses'), findsOneWidget);
+      expect(repository.competencyFilters.last, isNull);
+      expect(find.text('Pending'), findsOneWidget);
+      expect(find.text('Rejected'), findsOneWidget);
+    });
+
+    testWidgets('narrows to one status when the operator asks', (tester) async {
+      final repository = FakeAdminRepository(
+        competencyRows: <AdminCompetency>[
+          competencyFixture(id: 'c1'),
+          competencyFixture(id: 'c2', status: 'rejected', name: 'Retry Tutor'),
+        ],
+      );
+
+      await _pump(tester, repository);
+
+      await tester.tap(find.text('All statuses'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Rejected').last);
+      await tester.pumpAndSettle();
+
+      // Asked of the server, so the count the pager shows is the count of rows
+      // that actually match.
+      expect(repository.competencyFilters.last, CompetencyStatus.rejected);
+      expect(find.text('Retry Tutor'), findsOneWidget);
+      expect(find.text('Grace Tutor'), findsNothing);
+    });
+
+    testWidgets('says which question an empty filtered queue answers', (
+      tester,
+    ) async {
+      final repository = FakeAdminRepository();
+
+      await _pump(tester, repository);
+
+      // Not the console-wide "No records yet.": an operator who has just worked
+      // the pending queue to empty has not discovered anything is broken, and
+      // the message has to say which question they are looking at.
+      expect(find.text('No competencies submitted yet.'), findsOneWidget);
+
+      await tester.tap(find.text('All statuses'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Verified').last);
+      await tester.pumpAndSettle();
+
+      expect(find.text('No verified competencies.'), findsOneWidget);
+    });
+
+    testWidgets('returns to the first page when the filter changes', (
+      tester,
+    ) async {
+      final repository = FakeAdminRepository(
+        competencyRows: <AdminCompetency>[
+          for (var index = 0; index < 60; index++)
+            competencyFixture(id: 'c$index'),
+        ],
+      );
+
+      await _pump(tester, repository);
+      await tester.tap(find.text('Next'));
+      await tester.pumpAndSettle();
+      expect(repository.competencyRequests.last.page, 2);
+
+      await tester.tap(find.text('All statuses'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Rejected').last);
+      await tester.pumpAndSettle();
+
+      // Staying on page 3 of a queue that now matches one row would show an
+      // empty window, and an operator would read that as "I cleared the queue".
+      expect(repository.competencyRequests.last.page, 1);
+    });
+  });
+
+  group('one row', () {
+    testWidgets('shows the bar its grade has to clear and the verdict', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        FakeAdminRepository(
+          competencyRows: <AdminCompetency>[competencyFixture()],
+        ),
+      );
+
+      // The bar, so a decision is not a guess, and the verdict, so the gate is
+      // not discovered by being refused.
+      expect(find.text('B+ (4.30) against a 4.50 bar'), findsOneWidget);
+      expect(find.text('Clears the bar.'), findsOneWidget);
+    });
+
+    testWidgets('warns that a grade under the bar cannot be verified', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        FakeAdminRepository(
+          competencyRows: <AdminCompetency>[
+            competencyFixture(
+              gradeLabel: 'B',
+              gradePoints: '4.00',
+              meetsThreshold: false,
+            ),
+          ],
+        ),
+      );
+
+      // Said plainly, because the API refuses it: an operator who finds out
+      // afterwards has already read the evidence and made the call.
+      expect(find.text('B (4.00) against a 4.50 bar'), findsOneWidget);
+      expect(
+        find.text('Below the bar: verifying this will be refused.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('explains a missing grading scale rather than showing a ratio', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        FakeAdminRepository(
+          competencyRows: <AdminCompetency>[
+            competencyFixture(competencyMinPoints: null),
+          ],
+        ),
+      );
+
+      // A faculty whose university has no scale loaded is a normal state, not a
+      // fault -- but nothing here can be verified, so the row has to say so.
+      expect(find.text('against a '), findsNothing);
+      expect(find.textContaining('No grading scale loaded'), findsOneWidget);
+    });
+
+    testWidgets('shows why the last review refused it', (tester) async {
+      await _pump(
+        tester,
+        FakeAdminRepository(
+          competencyRows: <AdminCompetency>[
+            competencyFixture(
+              status: 'rejected',
+              rejectionReason: 'The transcript page is missing.',
+            ),
+          ],
+        ),
+      );
+
+      // The same string the tutor was given. An operator about to refuse again
+      // needs to know what the tutor has already been told.
+      expect(find.text('The transcript page is missing.'), findsOneWidget);
+    });
+
+    testWidgets('shows when it was submitted', (tester) async {
+      await _pump(
+        tester,
+        FakeAdminRepository(
+          competencyRows: <AdminCompetency>[
+            competencyFixture(submittedAt: '2026-03-04T10:30:00Z'),
+          ],
+        ),
+      );
+
+      // The queue is ordered by this and it is how long the tutor has waited.
+      expect(find.text('2026-03-04'), findsOneWidget);
+    });
+
+    testWidgets(
+      'shows a status this build does not know as the server spelled it',
+      (tester) async {
+        await _pump(
+          tester,
+          FakeAdminRepository(
+            competencyRows: <AdminCompetency>[
+              competencyFixture(status: 'awaiting_registry'),
+            ],
+          ),
+        );
+
+        // A newer API may legitimately have added a state. Blanking the cell would
+        // leave an operator unable to say what they are looking at.
+        expect(find.text('awaiting_registry'), findsOneWidget);
+        // And it is not offered as reviewable: this client cannot know what
+        // allows the transition, and the server owns it.
+        expect(find.widgetWithText(TextButton, 'Verify'), findsNothing);
+      },
+    );
   });
 }
 
 /// A repository whose review waits until its gate completes, so a test can
 /// observe the row while a write is in flight.
 class _GatedAdminRepository extends FakeAdminRepository {
-  _GatedAdminRepository(this._gate) : super(competencyRows: <AdminCompetency>[competencyFixture()]);
+  _GatedAdminRepository(this._gate)
+    : super(competencyRows: <AdminCompetency>[competencyFixture()]);
 
   final Completer<void> _gate;
 

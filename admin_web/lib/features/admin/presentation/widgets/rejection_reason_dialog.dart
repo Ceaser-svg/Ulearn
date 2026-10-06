@@ -42,7 +42,9 @@ class _RejectionReasonDialogState extends State<RejectionReasonDialog> {
     if (reason.isEmpty) {
       // Said here rather than swallowed, because the operator has asked to reject
       // something and has not yet said why.
-      setState(() => _error = 'A reason is required so the tutor knows what to fix.');
+      setState(
+        () => _error = 'A reason is required so the tutor knows what to fix.',
+      );
       return;
     }
     Navigator.of(context).pop(reason);

@@ -4,6 +4,7 @@ import 'package:peerpass_admin/core/models/admin_session.dart';
 import 'package:peerpass_admin/core/models/admin_tutor_standing.dart';
 import 'package:peerpass_admin/core/models/admin_user.dart';
 import 'package:peerpass_admin/core/models/audit_event.dart';
+import 'package:peerpass_admin/core/models/competency_status.dart';
 import 'package:peerpass_admin/core/network/admin_api_client.dart';
 import 'package:peerpass_admin/features/admin/data/repositories/admin_repository.dart';
 
@@ -49,8 +50,18 @@ class HttpAdminRepository implements AdminRepository {
       _page('/v1/admin/audit-events', request, AuditEvent.fromJson);
 
   @override
-  Future<AdminPage<AdminCompetency>> competencies(AdminPageRequest request) =>
-      _page('/v1/admin/competencies', request, AdminCompetency.fromJson);
+  Future<AdminPage<AdminCompetency>> competencies(
+    AdminPageRequest request, {
+    CompetencyStatus? status,
+  }) => _page(
+    '/v1/admin/competencies',
+    request,
+    AdminCompetency.fromJson,
+    // Omitted entirely when unfiltered rather than sent empty: `status=` would
+    // be a value the API's enum rejects, and a 422 on a list the operator simply
+    // opened would be a self-inflicted failure.
+    query: <String, dynamic>{if (status != null) 'status': status.wire},
+  );
 
   @override
   Future<AdminPage<AdminTutorStanding>> tutorStandings(
@@ -76,12 +87,14 @@ class HttpAdminRepository implements AdminRepository {
   Future<AdminPage<T>> _page<T>(
     String path,
     AdminPageRequest request,
-    T Function(Map<String, dynamic>) parse,
-  ) async {
+    T Function(Map<String, dynamic>) parse, {
+    Map<String, dynamic> query = const <String, dynamic>{},
+  }) async {
     final body = await _client.getPage(
       path,
       offset: request.offset,
       limit: request.limit,
+      query: query,
     );
     return AdminPage<T>.fromJson(body, parse);
   }

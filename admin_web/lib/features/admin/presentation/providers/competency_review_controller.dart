@@ -82,7 +82,10 @@ class CompetencyReviewController {
       case DioExceptionType.cancel:
         return 'The review was cancelled.';
       case DioExceptionType.badResponse:
-        return _describeStatus(error.response?.statusCode, error.response?.data);
+        return _describeStatus(
+          error.response?.statusCode,
+          error.response?.data,
+        );
       case DioExceptionType.unknown:
         return 'The review could not be recorded. Try again.';
     }
@@ -96,21 +99,23 @@ class CompetencyReviewController {
     final fields = _fieldErrorsOf(body);
 
     return switch (status) {
-      // The API's own wording, which for a verification refusal is the only place
-      // the university's threshold is stated.
-      400 || 422 =>
-        detail ?? 'The competency could not be reviewed with these details.',
-      401 => 'Your session has expired. Sign in again to continue reviewing.',
-      403 => 'You are not permitted to review competencies.',
-      404 =>
-        detail ??
-        'That competency no longer exists. It may have been reviewed already.',
-      409 => detail ?? 'This review conflicts with the current state.',
-      429 => 'Too many attempts. Wait a moment and try again.',
-      final int code when code >= 500 =>
-        detail ?? 'The server could not record the review. Try again shortly.',
-      _ => detail ?? 'The review could not be recorded. Try again.',
-    }.trimRight() + _suffix(fields);
+          // The API's own wording, which for a verification refusal is the only place
+          // the university's threshold is stated.
+          400 || 422 =>
+            detail ??
+                'The competency could not be reviewed with these details.',
+          401 =>
+            'Your session has expired. Sign in again to continue reviewing.',
+          403 => 'You are not permitted to review competencies.',
+          404 => detail ?? 'That competency no longer exists. It may have been reviewed already.',
+          409 => detail ?? 'This review conflicts with the current state.',
+          429 => 'Too many attempts. Wait a moment and try again.',
+          final int code when code >= 500 =>
+            detail ??
+                'The server could not record the review. Try again shortly.',
+          _ => detail ?? 'The review could not be recorded. Try again.',
+        }.trimRight() +
+        _suffix(fields);
   }
 
   /// Appends the per-field reasons to a validation message.

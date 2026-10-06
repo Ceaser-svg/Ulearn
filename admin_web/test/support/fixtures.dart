@@ -2,6 +2,7 @@ import 'package:peerpass_admin/core/models/admin_competency.dart';
 import 'package:peerpass_admin/core/models/admin_tutor_standing.dart';
 import 'package:peerpass_admin/core/models/admin_user.dart';
 import 'package:peerpass_admin/core/models/audit_event.dart';
+import 'package:peerpass_admin/core/models/competency_status.dart';
 
 /// Builds a pilot user for a fake console or a JSON fixture.
 AdminUser adminUserFixture({
@@ -22,12 +23,16 @@ AdminUser adminUserFixture({
 AuditEvent auditEventFixture({
   required String action,
   String actorId = 'admin-1',
+  String actorEmail = 'operator@peerpass.test',
+  String? actorName = 'Grace Operator',
   String targetType = 'user',
   String? targetPublicId = 'user-1',
   Map<String, dynamic> context = const <String, dynamic>{},
   String createdAt = '2026-01-02T10:30:00Z',
 }) => AuditEvent(
   actorId: actorId,
+  actorEmail: actorEmail,
+  actorName: actorName,
   action: action,
   targetType: targetType,
   targetPublicId: targetPublicId,
@@ -36,20 +41,38 @@ AuditEvent auditEventFixture({
 );
 
 /// Builds a competency for a fake console or a JSON fixture.
+///
+/// [status] is the wire string rather than the enum so a test can hand the
+/// console a status its build has never heard of, which is a state a newer API
+/// can legitimately produce.
 AdminCompetency competencyFixture({
   String id = 'competency-1',
   String email = 'tutor@peerpass.test',
   String? name = 'Grace Tutor',
   String status = 'pending',
+  String gradeLabel = 'B+',
+  String gradePoints = '4.30',
+  String? competencyMinPoints = '4.50',
+  bool meetsThreshold = true,
   String? evidence = 'transcript-2026.pdf',
+  String? rejectionReason,
+  String submittedAt = '2026-01-02T10:30:00Z',
+  String? verifiedAt,
 }) => AdminCompetency(
   id: id,
   email: email,
   name: name,
   unit: 'CS301 - Algorithms',
-  grade: 'B+',
-  status: status,
+  gradeLabel: gradeLabel,
+  gradePoints: gradePoints,
+  competencyMinPoints: competencyMinPoints,
+  meetsThreshold: meetsThreshold,
+  status: CompetencyStatus.parse(status),
+  rawStatus: status,
   evidence: evidence,
+  rejectionReason: rejectionReason,
+  submittedAt: DateTime.parse(submittedAt),
+  verifiedAt: verifiedAt == null ? null : DateTime.parse(verifiedAt),
 );
 
 /// Builds a tutor standing for a fake console or a JSON fixture.
