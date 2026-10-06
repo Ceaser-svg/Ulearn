@@ -13,11 +13,26 @@ import 'package:peerpass_admin/features/admin/presentation/widgets/rejection_rea
 /// competency is pending, because the backend owns the status transition and
 /// offering to verify an already-verified competency would be a button that
 /// cannot succeed.
-class CompetenciesScreen extends ConsumerWidget {
+class CompetenciesScreen extends ConsumerStatefulWidget {
   const CompetenciesScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<CompetenciesScreen> createState() => _CompetenciesScreenState();
+}
+
+class _CompetenciesScreenState extends ConsumerState<CompetenciesScreen> {
+  /// The competencies with a review in flight.
+  ///
+  /// A review is a write with no idempotency key, so a second tap while the first
+  /// is waiting is not a no-op: it sends a second decision for a record the server
+  /// has already moved on from, which fails, or -- worse for a rejection -- records
+  /// a second rejection reason. The buttons are disabled for the row while it is
+  /// busy, and the whole row's actions are removed so the operator sees the row is
+  /// decided rather than a pair of controls that might work.
+  final Set<String> _reviewing = <String>{};
+
+  @override
+  Widget build(BuildContext context) {
     return AdminDataTable<AdminCompetency>(
       title: 'Competency review',
       subtitle: 'Review tutor evidence before granting matching eligibility.',
@@ -31,70 +46,82 @@ class CompetenciesScreen extends ConsumerWidget {
         competency.status,
         competency.evidence ?? 'Not supplied',
       ],
-      actions: (competency, refresh) => competency.status == 'pending'
-          ? [
-              TextButton(
-                onPressed: () => _review(
-                  context,
-                  ref,
-                  verify: () => ref
-                      .read(competencyReviewControllerProvider)
-                      .verify(competency),
-                  refresh: refresh,
-                ),
-                child: const Text('Verify'),
-              ),
-              TextButton(
-                onPressed: () async {
-                  final reason = await showDialog<String>(
-                    context: context,
-                    builder: (context) => const RejectionReasonDialog(),
-                  );
-                  if (reason == null || reason.trim().isEmpty) return;
-                  if (!context.mounted) return;
-                  await _review(
-                    context,
-                    ref,
-                    verify: () => ref
-                        .read(competencyReviewControllerProvider)
-                        .reject(competency, reason.trim()),
-                    refresh: refresh,
-                  );
-                },
-                child: const Text('Reject'),
-              ),
-            ]
-          : const <Widget>[],
+      actions: _actions,
+    );
+  }
+
+  List<Widget> _actions(AdminCompetency competency, VoidCallback refresh) {
+    if (competency.status != 'pending') return const <Widget>[];
+    if (_reviewing.contains(competency.id)) {
+      return const [
+        SizedBox(
+          width: 16,
+          height: 16,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      ];
+    }
+
+    return [
+      TextButton(
+        onPressed: () => _review(
+          competency,
+          refresh,
+          action: (repository) => repository.verify(competency),
+          onSuccess: 'Competency verified.',
+        ),
+        child: const Text('Verify'),
+      ),
+      TextButton(
+        onPressed: () => _reject(competency, refresh),
+        child: const Text('Reject'),
+      ),
+    ];
+  }
+
+  Future<void> _reject(
+    AdminCompetency competency,
+    VoidCallback refresh,
+  ) async {
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (context) => const RejectionReasonDialog(),
+    );
+    // Null is a deliberate cancellation, which is not a failure and needs no
+    // message. The dialog itself refuses to return an empty reason.
+    if (reason == null) return;
+    if (!mounted) return;
+    await _review(
+      competency,
+      refresh,
+      action: (repository) => repository.reject(competency, reason),
+      onSuccess: 'Competency rejected.',
     );
   }
 
   Future<void> _review(
-    BuildContext context,
-    WidgetRef ref, {
-    required Future<CompetencyReviewOutcome> Function() verify,
-    required VoidCallback refresh,
+    AdminCompetency competency,
+    VoidCallback refresh, {
+    required Future<void> Function(CompetencyReviewController repository) action,
+    required String onSuccess,
   }) async {
-    CompetencyReviewOutcome outcome;
+    if (_reviewing.contains(competency.id)) return;
+
+    setState(() => _reviewing.add(competency.id));
     try {
-      outcome = await verify();
-    } on AdminValidationException catch (error) {
-      if (context.mounted) _notify(context, error.message);
+      await action(ref.read(competencyReviewControllerProvider));
+    } on AdminReviewException catch (error) {
+      if (mounted) _notify(context, error.message);
       return;
+    } finally {
+      if (mounted) setState(() => _reviewing.remove(competency.id));
     }
-    if (!context.mounted) return;
-    if (outcome == CompetencyReviewOutcome.failed) {
-      _notify(context, 'Could not record the review. Try again.');
-      return;
-    }
+
+    if (!mounted) return;
     // Re-read the list first: a competency that has just been decided must not
     // still be offering its own buttons.
     refresh();
-    _notify(
-      context,
-      outcome == CompetencyReviewOutcome.verified
-          ? 'Competency verified.'
-          : 'Competency rejected.',
-    );
+    _notify(context, onSuccess);
   }
 
   void _notify(BuildContext context, String message) {

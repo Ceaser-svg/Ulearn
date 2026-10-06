@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:peerpass_admin/core/models/admin_competency.dart';
 import 'package:peerpass_admin/core/models/admin_page.dart';
 import 'package:peerpass_admin/core/models/admin_session.dart';
@@ -33,7 +34,7 @@ class FakeAdminRepository implements AdminRepository {
       email: 'operator@peerpass.test',
     ),
     this.signInError,
-    this.failNextReview = false,
+    this.reviewError,
     this.listError,
   });
 
@@ -46,11 +47,15 @@ class FakeAdminRepository implements AdminRepository {
   /// Thrown from [signIn] when set, for the failure paths.
   Error? signInError;
 
-  /// Makes the next review throw a transport error.
-  bool failNextReview;
-
   /// Thrown from every list read while set, for the failure paths.
   Error? listError;
+
+  /// Set to have the next [reviewCompetency] fail, as a refused decision would.
+  ///
+  /// A [DioException], not an arbitrary error, because that is what the HTTP
+  /// repository actually throws: a screen test that made the fake fail with
+  /// something else would not be exercising the translation the console depends on.
+  DioException? reviewError;
 
   final List<AdminPageRequest> userRequests = <AdminPageRequest>[];
   final List<AdminPageRequest> auditEventRequests = <AdminPageRequest>[];
@@ -105,9 +110,10 @@ class FakeAdminRepository implements AdminRepository {
     String? reason,
   }) async {
     reviews.add(RecordedReview(competency, status, reason));
-    if (failNextReview) {
-      failNextReview = false;
-      throw StateError('review rejected by the fake');
+    final error = reviewError;
+    if (error != null) {
+      reviewError = null;
+      throw error;
     }
   }
 
