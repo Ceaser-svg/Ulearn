@@ -13,7 +13,7 @@ from app.models.enums import (
     VerificationSource,
 )
 from app.schemas.base import OrmSchema, RequestSchema, Trimmed
-from app.schemas.common import Page
+from app.schemas.common import Page, PageParams
 from app.schemas.competency import MAX_EVIDENCE_REFERENCE_LENGTH
 
 
@@ -38,6 +38,8 @@ class AdminUserPage(Page[AdminUserResponse]):
 class AdminAuditEventResponse(OrmSchema):
     id: uuid.UUID = Field(validation_alias="public_id")
     actor_id: uuid.UUID
+    actor_email: str
+    actor_name: str | None
     action: str
     target_type: str
     target_public_id: uuid.UUID | None
@@ -50,7 +52,13 @@ class AdminAuditEventPage(Page[AdminAuditEventResponse]):
 
 
 class AdminCompetencyResponse(OrmSchema):
-    """The review fields staff need without embedding academic documents."""
+    """The review fields staff need without embedding academic documents.
+
+    The grade is sent as both a label and a number, and the bar it has to clear
+    is sent with it. An operator deciding on a submission is judging exactly
+    that comparison, and a server-side gate they cannot see is a gate they can
+    only discover by being refused.
+    """
 
     id: uuid.UUID
     user_id: uuid.UUID
@@ -59,16 +67,42 @@ class AdminCompetencyResponse(OrmSchema):
     course_unit_id: uuid.UUID
     course_unit_code: str
     course_unit_name: str
+    grade_label: str
     grade_points: str
+    #: The lowest grade on this unit's scale that makes a tutor eligible, in
+    #: the same points as `grade_points`. `None` when the unit's university has
+    #: no grading scale loaded, which is a normal state, not a fault.
+    competency_min_points: str | None
+    #: Whether `grade_points` already clears `competency_min_points`.
+    meets_threshold: bool
     status: CompetencyStatus
     source: VerificationSource
     evidence_reference: str | None
     rejection_reason: str | None
+    #: When the submission was made. The queue is ordered by this, and it is how
+    #: long a tutor has been waiting.
     created_at: datetime
+    #: When the competency was verified, which is `None` for every other status.
+    verified_at: datetime | None
 
 
 class AdminCompetencyPage(Page[AdminCompetencyResponse]):
     """A bounded page of tutor evidence awaiting or completing review."""
+
+
+class AdminCompetencyPageParams(PageParams):
+    """The review queue's paging plus the one filter an operator actually uses.
+
+    `status` is a narrow filter and deliberately not a generic query object. The
+    queue is triaged by status -- work through everything pending, then look at
+    what was rejected -- and a general filter language over an audit surface is
+    more authority than the job needs.
+    """
+
+    status: CompetencyStatus | None = Field(
+        default=None,
+        description="Only rows in this status. Omit for every status.",
+    )
 
 
 class AdminCompetencyReviewRequest(RequestSchema):

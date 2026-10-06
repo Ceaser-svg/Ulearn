@@ -9,6 +9,7 @@ from app.api.deps import AdminUser, DatabaseSession
 from app.schemas.admin import (
     AdminAuditEventPage,
     AdminCompetencyPage,
+    AdminCompetencyPageParams,
     AdminCompetencyResponse,
     AdminCompetencyReviewRequest,
     AdminTutorStandingPage,
@@ -19,6 +20,7 @@ from app.services import admin_service
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 AdminPageParams = Annotated[PageParams, Depends()]
+CompetencyPageParams = Annotated[AdminCompetencyPageParams, Depends()]
 
 
 @router.get("/users", response_model=AdminUserPage)
@@ -47,8 +49,14 @@ async def list_audit_events(
 async def list_competencies(
     caller: AdminUser,
     db: DatabaseSession,
-    params: AdminPageParams,
+    params: CompetencyPageParams,
 ) -> AdminCompetencyPage:
+    """List the review queue, optionally narrowed to one status.
+
+    Each row carries its grade label, the bar that grade has to clear, and
+    whether it clears it, so an operator can see a refusal before making the
+    decision that would be refused.
+    """
     page = await admin_service.list_competencies(db, caller.user.id, params)
     await db.commit()
     return page
